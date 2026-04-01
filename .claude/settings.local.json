@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(NODE=\"/c/Users/jzenteno/AppData/Local/ms-playwright-go/1.50.1/node.exe\")",
+      "Bash(__NEW_LINE_22a3ca78a5c15c2d__ $NODE -e \":*)",
+      "Bash(__NEW_LINE_37a89b50b088a6cf__ $NODE -e \":*)",
+      "Bash(code -a \"c:/Users/jzenteno/Claude code VS/tarifas-dow\")",
+      "Read(//c/Users/jzenteno/Claude code VS/tarifas-dow/**)",
+      "Bash(gh repo:*)",
+      "Bash(find '/c/Users/jzenteno/Claude code VS/export-control-automatization' -maxdepth 2 -type f -name *.md -o -name *.json -o -name .env* -o -name CLAUDE.md)"
+    ]
+  }
+}
