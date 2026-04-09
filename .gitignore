@@ -21,6 +21,3 @@ config/token.pickle
 Thumbs.db
 Desktop.ini
 .DS_Store
-
-# Project
-files/downloads/
