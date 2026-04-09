@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+> Contexto global en ~/.claude/CLAUDE.md
+> Skills disponibles en ~/.claude/skills/
+> Contexto operativo completo en ssb-context/BUSINESS_CONTEXT.md
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
