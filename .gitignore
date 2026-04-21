@@ -1,17 +1,15 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
+# Node / frontend
+node_modules/
 dist/
 build/
-venv/
-.venv/
+.next/
+.netlify/
+*.log
 
-# Credentials & secrets
-config/credentials.json
-config/token.pickle
-*.pickle
+# Secrets
 .env
+.env.local
+.env.*.local
 
 # IDE
 .vscode/
@@ -21,4 +19,7 @@ config/token.pickle
 Thumbs.db
 Desktop.ini
 .DS_Store
+*:Zone.Identifier
+
+# Claude Code
 .claude/settings.local.json
