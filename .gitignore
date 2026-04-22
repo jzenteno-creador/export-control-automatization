@@ -23,3 +23,13 @@ Desktop.ini
 
 # Claude Code
 .claude/settings.local.json
+
+# Supabase (archivos de trabajo local del CLI)
+supabase/.temp/
+supabase/.branches/
+
+# MCP config (puede contener credenciales de otros servers a futuro)
+.mcp.json
+
+# Datos reales de Dow — NO SUBIR A GITHUB
+samples/
