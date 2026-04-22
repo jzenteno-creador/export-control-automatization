@@ -3,7 +3,7 @@
 **Proyecto**: SSB-IT-RESEARCH
 **Propósito**: documento de contexto operativo y glosario del negocio. Fuente única para que cualquier decisión técnica (schema, arquitectura, prompts, workflows) esté anclada en la operativa real de SSB.
 **Autor**: Jona Zenteno (contenido), consolidación con Claude.
-**Versión**: 1 — 22/04/2026
+**Versión**: 2 — 22/04/2026 (cierre tarde)
 **Mantenimiento**: se actualiza cuando aparece un concepto nuevo del dominio o cambia la operativa. No se edita sin consulta a Jona.
 
 ---
@@ -68,7 +68,7 @@ Brasil es el 70%+ del volumen. Después Chile, Perú, Tierra del Fuego. Volumen 
 
 ### 4.3 Tipos de orden SAP
 
-Dow emite dos tipos de orden con prefijos distintos en el PO, visibles en los 304. **Confirmado operativamente por Jona (22/04)**:
+Dow emite dos tipos de orden con prefijos distintos en el PO, visibles en los 304. **Confirmado operativamente por Jona (22/04)** y **validado empíricamente con los 11 JSONs cargados el 22/04 tarde**:
 
 | Prefijo PO | Tipo | Características en el 304 |
 |---|---|---|
@@ -76,6 +76,8 @@ Dow emite dos tipos de orden con prefijos distintos en el PO, visibles en los 30
 | `4010...` | **STO** (Stock Transfer Order, intercompany Dow → Dow) | Trae solo qualifiers mínimos: `19`, `11`, `PE`, `SF`, `PO` |
 
 El prefijo es estable: todas las trade arrancan con `0118`, todas las STO con `4010`.
+
+**Validación empírica (11 JSONs)**: 6 Trade + 5 STO = 11. Sin excepciones. Sin órdenes con prefijos distintos.
 
 **Diferencia operativa clave para el dashboard**:
 
@@ -86,6 +88,7 @@ El prefijo es estable: todas las trade arrancan con `0118`, todas las STO con `4
 | Estandarización del flujo | Alta. | Media — requiere leer instrucciones específicas del exportador en cada orden. |
 | Regulación US (AES) | No aplica (es intercompañía). | Aplica. `AEG` lleva el tipo de consignee final. |
 | Candidato a automatización fase 3 | **Alto** — mailing resoluble con tabla maestra cliente → forwarder. | **Medio** — requiere parseo IA del campo de instrucciones. |
+| Tamaño del campo `BusinessInstructionsReferenceNumberNotes` (empírico) | Plantillas repetidas idénticas: Comissaria Pibernat 3 órdenes con 3027 chars iguales, Caravan 2 órdenes con 1926 chars iguales. Sugiere parseabilidad alta. | Más variable: rango de 44 a 2065 chars en la muestra. |
 
 #### Clientes STO (intercompany Dow → Dow)
 - Dow Brasil Ind e Com (Navegantes, Itajaí, Santos, Manaus, Paranaguá, Rio de Janeiro, Extrema)
@@ -104,6 +107,8 @@ Codificado en el 304 como `RouteInformation[].TransportationMethodTypeCode`:
 
 - **`O` (Ocean)**: marítimo containerizado. El grueso del volumen. Puertos argentinos de salida: Bahía Blanca (PTN, directo desde planta) y Buenos Aires (TRP, EXOLGAN — la mercadería llega en tren desde Bahía Blanca vía Abbott en algunos casos).
 - **`M` (Motor)**: terrestre. Sale directo de plantas (aduanas domiciliarias). Paso principal: Paso de los Libres hacia Brasil. Secundario: Iguazú. Transportistas habituales: Don Pedro, Petrolera Alvear, Expreso El Aguilucho, Moggia, Siltrans, Loddin, Celsur.
+
+**Validación empírica (11 JSONs)**: 8 marítimos + 3 terrestres.
 
 ### 4.5 Tipo de exportación (IntermodalServiceCode)
 
@@ -128,7 +133,7 @@ Codificado en el 304 como `Items[].ContainerDetails.IntermodalServiceCode`:
 
 ### 5.1 Metric — sistema core de SSB
 - Desarrollado por programadores externos. Repo: `git.ssbint.com/ssb_int_git/sosab-api.git`.
-- **Recibe el JSON del 304 desde SAP** (el mismo que entra al Importer, retransmitido o en paralelo — Q2 pendiente).
+- **Recibe el JSON del 304 desde SAP** (el mismo que entra al Importer, en paralelo — Q2 cerrada en research.md sección 4).
 - El coordinador carga manualmente: booking, cortes, buque, flete, aduana, transporte.
 - Genera el PDF de instrucción de exportación para Interlog.
 - Emite eventos 315 a SAP con fechas de tracking.
@@ -216,6 +221,7 @@ Codificado en el 304 como `Items[].ContainerDetails.IntermodalServiceCode`:
 ### 6.10 Certificado de Origen (COO)
 - Se tramita en la Cámara Argentina de Comercio.
 - Aplica al ~95% de las exportaciones (producto argentino).
+- **Modalidades**: digital (la mayoría) y **físico** (con firma y sello reales). El COO físico es el único documento que viaja por courier/correo al cliente; el resto de la documentación es 100% electrónico. Ver sección 7bis.
 
 ### 6.11 Packing List
 - Variantes marítimo y terrestre.
@@ -255,8 +261,62 @@ Codificado en el 304 como `Items[].ContainerDetails.IntermodalServiceCode`:
 
 ### Fase 5 — Envío al cliente y tracking
 21. Documental arma el mail con BL + factura + packing list + COO + CRT según aplique.
-22. Envío manual al cliente según instrucciones (texto libre en el 304, ver campo crítico más abajo).
+22. Envío manual al cliente según instrucciones (ver sección 7bis).
 23. Metric emite eventos 315 a SAP: Sailing Date, Confirmed on Board, Customs Cleared, BL Received, Vessel Arrival, etc.
+
+---
+
+## 7bis. Reglas operativas del mailing al cliente
+
+Sección crítica. El mailing al cliente es uno de los puntos de dolor principales (P3 en sección 10) y su automatización es el objetivo de mayor valor del dashboard post-MVP.
+
+### 7bis.1 Modalidad de envío
+
+| Modalidad | Cuándo aplica | Materialización |
+|---|---|---|
+| **Electrónico** | Default — ~95%+ de las órdenes | Mail con documentación adjunta (BL, factura, packing list, COO digital, CRT cuando aplique). |
+| **Físico** | Solo órdenes con **COO físico** requerido | Además del envío electrónico, courier/correo postal con el COO con firma y sello reales de la Cámara Argentina de Comercio. Algunos países/clientes lo exigen por regulación aduanera local. |
+
+**Implicancia para el dashboard**: necesita un flag `requiere_envio_fisico` derivado por orden. La regla precisa de cuándo aplica el físico queda como pregunta abierta para el equipo documental (ver Q28 en `preguntas.md`).
+
+### 7bis.2 Origen del destinatario
+
+La lista de destinatarios de cada orden se compone de **dos fuentes complementarias del 304**:
+
+| Fuente | Qué aporta | Fiabilidad |
+|---|---|---|
+| **Campo `BusinessInstructionsReferenceNumberNotes`** (texto libre del exportador) | Indica **qué documentación** mandar y **a quién**, con instrucciones específicas por orden. Parte estructurada con marcadores `#12A#`, `#13A#`, `#15B#` y parte texto libre. Ver sección 8. | Alta para Trade (instrucciones explícitas). Requiere parseo con IA en fase 2-3. |
+| **Entidad `N1` (Notify Party)** | Mail de contacto del notify. **Presente en los 11 JSONs analizados (100%)**. | Alta como fallback universal. Validado empíricamente. |
+
+**Regla práctica a implementar**:
+
+1. Parsear el campo de instrucciones con IA → obtener lista principal de destinatarios y reglas específicas.
+2. Si el parseo falla o no hay destinatarios claros → usar el mail de la entidad `N1` del 304 como fallback.
+3. Aplicar overrides del cliente (ver 7bis.4).
+4. Cuando Brian/SSB inicie el flujo, loguear qué fuente se usó (IA / N1 / override) para trazabilidad.
+
+### 7bis.3 Diferencia operativa STO vs Trade
+
+Implicancia directa para automatización:
+
+- **STO (prefijo `4010...`)**: el destinatario es casi siempre un **despachante/forwarder intermediario conocido** del lado destino (Comissaria Pibernat en Brasil, BDP International en Chile, etc.). El mailing es **automatizable sin IA** con una tabla maestra `cliente_sto → despachante_destino`. Ver Q29 en `preguntas.md` (pendiente confirmar si esa tabla existe hoy en SSB).
+- **Trade (prefijo `0118...`)**: el destinatario suele ser el **cliente directo** o un intermediario variable. Requiere parseo del campo de instrucciones (IA) o uso del fallback N1.
+
+### 7bis.4 Overrides por cliente — requerimiento del dashboard
+
+**Capacidad que el dashboard debe tener en la web** (no resuelve por sí solo el 304 — es decisión manual del equipo documental):
+
+1. **Agregar destinatarios** a la lista derivada del 304 a nivel cliente. Caso típico: un cliente pide incluir backup, persona nueva del equipo, gerente en copia.
+2. **Excluir destinatarios** de la lista derivada del 304 a nivel cliente o a nivel orden puntual. Caso típico: mail de persona que dejó la empresa, mail equivocado, contacto que pidió baja.
+
+**Principios**:
+
+- **Persistencia por cliente**: los overrides se configuran una vez, no en cada orden.
+- **Excepciones a nivel orden**: posibilidad de override puntual solo para una orden específica (sin afectar la regla del cliente).
+- **Audit trail obligatorio**: quién agregó/quitó, cuándo, por qué pedido. Sin trazabilidad no se puede responder "¿por qué sigue llegando a X?" o "¿quién sacó a Y?".
+- **Reversible**: baja un override no implica borrar historial.
+
+**Cuándo se implementa**: fuera del MVP. Módulo de mailing completo = fase 2/3 del proyecto.
 
 ---
 
@@ -286,6 +346,17 @@ Merece sección propia por su valor operativo.
 
 **En el schema**: se persiste el texto completo crudo, sin transformar, hasta que exista un modelo de parseo validado.
 
+**Validación empírica del tamaño (11 JSONs del 22/04)**:
+
+| Rango de caracteres | Cantidad de JSONs | Observación |
+|---|---|---|
+| < 100 | 2 | Rio Chico (78), BDP South America (44) |
+| 500 - 1000 | 3 | Tecnología de Materiales (553), Cryovac (837), BDP Chile (873) |
+| 1500 - 2100 | 3 | Caravan do Brasil (1926) x2, Chiacchio (2065) |
+| 3000+ | 3 | Comissaria Pibernat (3027) x3 |
+
+Las 3 órdenes de Pibernat (3027 idéntico) y las 2 de Caravan (1926 idéntico) sugieren **plantillas repetidas** — buena noticia para el parseo IA, patrón estable.
+
 ---
 
 ## 9. Identificadores operativos (nomenclatura de campos)
@@ -307,6 +378,20 @@ Referencia rápida de números que aparecen en la operativa. Esta sección es el
 | **Invoice** | Número de factura de exportación | Formato con guion | `0110-00054905` |
 | **COO** | Número certificado de origen | `AR004...` | `AR004A18250003162300` |
 
+**Nota importante sobre leading zeros del PO**:
+
+SAP persiste los PO como **CHAR(10) con ceros a izquierda** (alineación a derecha con relleno). Es convención interna SAP, no dato operativo.
+
+- En el JSON del 304 llega siempre con 10 dígitos: `0118705352`.
+- El equipo operativo lo busca, escribe y menciona **sin el cero inicial**: `118705352`.
+- En STO el primer dígito es `4`, así que no hay ceros a quitar: `4010470219` queda igual.
+
+**Regla para el dashboard**:
+- **Persistir crudo** tal cual llega (10 chars, cumple criterio no-negociable #5 de `plan.md` sobre preservar el input).
+- **Mostrar al usuario** sin el cero a la izquierda.
+- La conversión es trivial: `TRIM(LEADING '0' FROM po)` en SQL o `parseInt` en JavaScript.
+- Este tratamiento es un ejemplo concreto de **Anti-Corruption Layer (ACL)**: la convención de SAP no debe contaminar la UI ni el resto del modelo interno.
+
 ### 9.2 Identificadores de producto
 
 | Concepto | Dónde aparece | Significado |
@@ -324,11 +409,21 @@ Referencia rápida de números que aparecen en la operativa. Esta sección es el
 | **Service Type** | `TariffServiceCode` | `DD` (Door-to-Door), `DP` (Door-to-Port) |
 | **Shipping Point / SH Point** | Qualifier `SF` en refs generales | `D146`, `D116`, `D147`, `D176` |
 | **Transportation Planning Point** | Qualifier `PE` en refs generales | `P703`, `P706`, `P749` |
-| **Destination** | `DeliveryLocation` (texto libre) | `"SALVADOR PORT"`, `"NAVEGANTES PORT"`, `"MAIPU"` |
+| **DeliveryLocation (lugar Incoterm)** | `DeliveryLocation` (texto libre) | `"SALVADOR PORT"`, `"NAVEGANTES PORT"`, `"BAHIA BLANCA"`, `"MAIPU"` — **ver nota crítica abajo** |
+| **Destino físico final** | Entidad `ST` (Ship To) → `CityName` + `CountryCode` | `EXTREMA / BR`, `LONDRINA / BR`, `RIO GRANDE / AR` |
 | **Container Type** | `Items[].ContainerDetails.EquipmentType` | `40CZ` (marítimo 40'), `VAEM` (terrestre/van) |
 | **Fecha planificada de despacho** | Sub-qualifier `PGIDATE` en items | YYYYMMDD, ej `20260425` |
 | **Fecha solicitada de despacho** | Qualifier `RSD` en `DateTimeReference` | YYYYMMDD |
 | **Fecha entrega requerida** | Qualifier `002` en `DateTimeReference` | YYYYMMDD |
+
+**Nota crítica sobre destino** (corrección importante del 22/04):
+
+`DeliveryLocation` **no es el destino físico final de la mercadería**. Es el lugar asociado al Incoterm declarado:
+
+- En Incoterms **CPT / CFR** (Carriage Paid To / Cost and Freight): `DeliveryLocation` es el **puerto de descarga**. Ej: Santos Port, Navegantes Port. Pero la mercadería continúa después por camión interior hasta el cliente (ej: Santos Port → Extrema, 400 km tierra adentro).
+- En Incoterms **FCA / FOB** (Free Carrier / Free On Board): `DeliveryLocation` es el **punto de entrega en origen**. Ej: Bahía Blanca, Abbott Whse. La mercadería va físicamente a otro destino (ej: Abbott Whse → Rio Grande, Tierra del Fuego).
+
+Para obtener el **destino físico final** (lo que el documental necesita para el mailing) hay que mirar la entidad `ST` (Ship To) del JSON, no `DeliveryLocation`. Implicancia para el schema: el dashboard necesita **dos campos distintos**, destino logístico Incoterm + destino físico final. Si mostrara solo uno, rompe la operativa.
 
 ### 9.4 Actores del embarque (Entities del 304)
 
@@ -356,7 +451,7 @@ Los documentales cruzan 3 fuentes (planilla de aduana, factura, booking) para ca
 Cruce manual de BL draft contra factura, planilla y otros documentos. Errores recurrentes: tipeo, producto desactualizado, permiso mal escrito, peso incorrecto. **Oportunidad**: automatizar cruce con IA (fase 2-3 del dashboard).
 
 ### P3 (crítico) — Mailing de documentación
-100% manual. Documental busca docs en Drive, arma mail, adjunta, envía. Puede haber 2-3 envíos por orden. Sin seguimiento, sin alertas de arribo al cliente. **Oportunidad**: pre-armar mail con estructura fija + adjuntos correctos + destinatarios extraídos del campo `BusinessInstructionsReferenceNumberNotes` del 304.
+100% manual. Documental busca docs en Drive, arma mail, adjunta, envía. Puede haber 2-3 envíos por orden. Sin seguimiento, sin alertas de arribo al cliente. **Oportunidad**: pre-armar mail con estructura fija + adjuntos correctos + destinatarios derivados del 304 (`BusinessInstructions...` + `N1`) + overrides configurables por cliente. Ver sección 7bis.
 
 ### P4 — Duplicación Metric / Excel
 Toda coordinación se carga dos veces: Metric (cara al cliente SAP) + Excel (herramienta interna). Reducir la duplicación es objetivo largo plazo.
@@ -388,8 +483,8 @@ OCR pendiente en n8n para completar archivado automático de CRT (los digitales 
 ### Del dashboard nuevo (SSB-IT-RESEARCH)
 | Integración | Tipo | Fase |
 |---|---|---|
-| Dashboard ← 304 (Importer o Metric) | Webhook / pull / evento | Decisión pendiente (Q1) |
-| Dashboard → Supabase | Persistencia | Pendiente diseño schema |
+| Dashboard ← 304 (Importer, webhook) | Webhook HTTP POST desde Importer Laravel al endpoint Supabase | Endpoint desplegado 22/04, esperando que Brian implemente outbound call |
+| Dashboard → Supabase | Persistencia | Walking Skeleton desplegado (tabla `inbound_events` con 11 filas reales al 22/04 tarde) |
 | Dashboard ↔ n8n | Orquestación de workflows | Pendiente |
 | Dashboard ↔ Claude API | Control BL + parseo instrucciones | Fase 2-3 |
 
@@ -482,4 +577,4 @@ Estos proyectos existen en paralelo. **No se arrastran por defecto al diseño de
 
 ---
 
-*Última actualización: 22/04/2026. Se actualiza cuando aparece un concepto nuevo del dominio o cambia la operativa.*
+*Última actualización: 22/04/2026 (cierre tarde). Se actualiza cuando aparece un concepto nuevo del dominio o cambia la operativa.*

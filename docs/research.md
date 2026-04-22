@@ -2,8 +2,8 @@
 
 **Proyecto**: SSB-IT-RESEARCH
 **Autor**: Jona Zenteno
-**Última actualización**: 22/04/2026
-**Estado**: investigación con primer Walking Skeleton desplegado. Endpoint receptor del 304 en Supabase (fase de infraestructura mínima, no MVP aún).
+**Última actualización**: 22/04/2026 (cierre tarde)
+**Estado**: investigación con Walking Skeleton desplegado + 11 JSONs reales cargados y analizados vía SQL. Hallazgos empíricos incorporados en sección 7.13.
 
 ---
 
@@ -48,12 +48,7 @@ Etapas operativas a cubrir (orden cronológico, no de prioridad de desarrollo):
 
 ### 2.2 Vínculo Importer ↔ Metric
 
-**No confirmado.** Hipótesis operativa: el Importer retransmite a Metric los datos que recibe. A validar con Brian/Santiago.
-
-El doc técnico del Importer que pasó Brian no menciona integración con Metric. Tres lecturas posibles:
-1. No hay conexión automática Importer↔Metric.
-2. Brian no la incluyó porque el pedido era solo Importer.
-3. La conexión existe pero va por fuera del código del Importer (ETL, Metric leyendo DB, etc.).
+**Cerrado 22/04**: no existe flujo Importer → Metric. SAP envía el 304 **en paralelo** a los dos sistemas. Ver sección 4.2.
 
 ---
 
@@ -108,7 +103,7 @@ El Importer registra **todas** las integraciones recibidas vía API (JSON entran
 
 **Implicancia estratégica**: desbloquea el schema del 304 sin depender de Brian. Pudiendo descargar JSONs reales históricos, el schema se obtiene por inferencia directa.
 
-**Estado**: tarea completada. Se descargaron 11 JSONs reales del 304 desde el módulo Logs de JSON. Análisis documentado en sección 7.
+**Estado**: tarea completada. Se descargaron 11 JSONs reales del 304 desde el módulo Logs de JSON. Análisis documentado en sección 7. **Validación empírica adicional completada el 22/04 tarde**: los 11 JSONs fueron cargados al endpoint del Walking Skeleton y analizados vía SQL — hallazgos en sección 7.13.
 
 ### 3.5 Módulos de la plataforma (resumen)
 
@@ -317,7 +312,7 @@ Todo JSON del 304 tiene 7 zonas principales:
   "ReferenceIdentificationGeneral": [...],      // referencias nivel orden (PO, CO, etc.)
   "CurrencyCode": "USD",
   "TransportationTermsCode": ...,               // Incoterm
-  "DeliveryLocation": ...,                      // destino (texto libre)
+  "DeliveryLocation": ...,                      // lugar Incoterm (NO destino físico)
   "TermsOfSale": 0 o 31,                        // código numérico condición de pago
   "TermsOfSaleDescription": "...",              // texto libre condición de pago
   "DateTimeReference": [...],                   // fechas clave
@@ -355,7 +350,7 @@ Todo JSON del 304 tiene 7 zonas principales:
 | Campo JSON | Valores vistos | Significado |
 |---|---|---|
 | `TransportationTermsCode` | `CPT`, `CFR`, `FCA` | Incoterm 2020. CPT = Carriage Paid To. CFR = Cost and Freight. FCA = Free Carrier. |
-| `DeliveryLocation` | texto libre | Puerto o ciudad de destino. Ej: `"SALVADOR PORT"`, `"Navegantes Port"`, `"BAHIA BLANCA"`, `"MAIPU"`, `"CALLAO PORT"`. **Sin normalizar** — inconsistencia de casing entre JSONs. |
+| `DeliveryLocation` | texto libre | **Lugar asociado al Incoterm declarado**, no necesariamente el destino físico final de la mercadería. En Incoterms CPT/CFR representa el puerto de destino marítimo; en FCA/FOB representa el punto de entrega en origen. **Debe interpretarse siempre junto con `TransportationTermsCode`.** Ver 7.13 hallazgo 1. Ej: `"SALVADOR PORT"`, `"Navegantes Port"`, `"BAHIA BLANCA"`, `"MAIPU"`, `"CALLAO PORT"`. **Sin normalizar** — inconsistencia de casing entre JSONs (`"NAVEGANTES PORT"` vs `"Navegantes Port"` aparecen como 2 valores distintos para el sistema, pero es el mismo puerto). |
 | `TermsOfSale` | `0`, `31` | Código numérico de condición de pago. `0` = términos inmediatos/especiales (se lee del texto), `31` = "NET EOM PLUS 1 MO PLUS 1 DAY". |
 | `TermsOfSaleDescription` | texto libre | Descripción humana de la condición de pago. Ej: `"60 DAYS AFTER B/L DATE"`, `"NET 60 DAYS FROM INVOICE DATE"`, `"75 DAYS FROM INVOICE DATE - DATED DRAFT"`. |
 
@@ -419,8 +414,8 @@ Roles encontrados (`EntityIdentifier`) con frecuencia en los 11 JSONs:
 |---|---|---|---|
 | `16` | 11/11 | Plant (punto de despacho / sede logística) | Planta PBB Polisur o warehouse Dow (Bahía Blanca, Abbott) |
 | `EX` | 11/11 | Exportador | **Siempre PBBPOLISUR S.R.L. (A136)** — constante |
-| `ST` | 11/11 | Ship To (destinatario físico) | Cliente final o hub Dow destino |
-| `N1` | 11/11 | Notify Party | Despachante o cliente del lado importador |
+| `ST` | 11/11 | Ship To (destinatario físico) | Cliente final o hub Dow destino. **Este es el destino físico real de la mercadería** — ver 7.13 hallazgo 1 |
+| `N1` | 11/11 | Notify Party | Despachante o cliente del lado importador. **Fallback confirmado para el mailing** — ver 7.13 hallazgo 2 |
 | `BT` | 11/11 | Bill To (a quién facturar) | Generalmente = Ship To, salvo trade con intermediarios |
 | `NP` | 11/11 | Notify Party secundario | Segundo notify (banco, agente, partner logístico) |
 | `DIR` | 10/11 | Distribution Recipient | Destinatario de distribución posterior o responsable específico |
@@ -652,14 +647,16 @@ Para el diseño de Supabase, clasificación por criticidad operativa (basado en 
 
 **Categoría A — Críticos para el dashboard (se muestran/operan con ellos diariamente)**
 
-- `PO` (de `ReferenceIdentificationGeneral`) — identificador principal visible.
+- `PO` (de `ReferenceIdentificationGeneral`) — identificador principal visible. **Persistir crudo (10 chars) + mostrar sin leading zero** (ver `business-context.md` 9.1).
 - `ShipmnetIdentificationNumber` — ID secundario.
 - `TransportationMethodTypeCode` (MOT: O/M) — discrimina marítimo/terrestre.
 - `IntermodalServiceCode` — tipo de exportación.
-- `TransportationTermsCode` (Incoterm).
-- `DeliveryLocation` (puerto/destino).
+- `TransportationTermsCode` (Incoterm) — **crítico**, determina la interpretación de `DeliveryLocation`.
+- `DeliveryLocation` — **lugar Incoterm, NO destino físico final**. Se combina obligatoriamente con `TransportationTermsCode` para interpretar. Ver 7.13 hallazgo 1.
 - `TariffServiceCode` (DD/DP).
-- Entidades: `EX`, `ST`, `N1`, `BT`, `CN` — con Name, TAXID, Address, Email principal.
+- **Entidad `ST` (Ship To) — destino físico final** de la mercadería. Campos críticos: `Name`, `CityName`, `CountryCode`, `TAXID`, `AddressInformation`. Es la fuente real del destino para mailing, tracking, documentación.
+- Entidad `N1` (Notify Party) — nombre, email del contacto. **Fallback universal del mailing** (11/11 con mail en la muestra). Ver 7.13 hallazgo 2.
+- Entidades `EX`, `BT`, `CN` con `Name`, `TAXID`, `Address`, `Email` principal.
 - `Items[].LadingDescription` — nombre del producto.
 - `Items[].CommodityCode` (GMID).
 - `Items[].ContainerDetails.NumberOfContainers` y `EquipmentType`.
@@ -667,7 +664,7 @@ Para el diseño de Supabase, clasificación por criticidad operativa (basado en 
 - `DateTimeReference` (RSD y 002).
 - `Items[].BusinessInstructionsAndReferenceNumber.PGIDATE` — fecha despacho planificada.
 - `Items[].BusinessInstructionsAndReferenceNumber.DELIVERY` — número de delivery SAP.
-- `BusinessInstructionsReferenceNumberNotes` — instrucciones al forwarder (texto crítico).
+- `BusinessInstructionsReferenceNumberNotes` — instrucciones al forwarder (texto crítico). Ver sección 8 de `business-context.md` y 7bis del mismo archivo para su rol en el mailing.
 
 **Categoría B — Trazabilidad (se guardan, se consultan a demanda)**
 
@@ -712,5 +709,82 @@ Para cerrar el schema definitivamente, resta validar:
 10. **Normalización de `LocationIdentifier`** (B, C, BA, SC, SP, PR, RM, LIM, V, MG, MEX) a códigos de estado/provincia o UN/LOCODE.
 
 Estas preguntas se agregan a `preguntas.md`.
+
+### 7.13 Validación empírica con los 11 JSONs cargados (22/04 tarde)
+
+Los 11 JSONs fueron cargados al endpoint del Walking Skeleton y analizados vía SQL sobre la tabla `inbound_events` en Supabase. Hallazgos netos que complementan o corrigen la documentación previa:
+
+#### Hallazgo 1 — `DeliveryLocation` ≠ destino físico final (corrección importante)
+
+Cruzando `DeliveryLocation` con `TransportationTermsCode` (Incoterm) y con la entidad `ST.CityName`:
+
+| Incoterm | DeliveryLocation | Ship To city | Ship To país | Ship To empresa |
+|---|---|---|---|---|
+| CFR | Navegantes Port | ITAJAI | BR | DOW BRASIL |
+| CFR | Santos Port | EXTREMA | BR | DOW BRASIL |
+| CFR | Santos Port | EXTREMA | BR | DOW BRASIL |
+| CFR | Santos Port | EXTREMA | BR | DOW BRASIL |
+| CPT | CALLAO PORT | LIMA | PE | TECNOLOGIA DE MATERIALES |
+| CPT | MAIPU | MAIPU | CL | PETROQUIMICA DOW |
+| CPT | NAVEGANTES PORT | BALNEARIO CAMBORIU | BR | CARAVAN DO BRASIL |
+| CPT | NAVEGANTES PORT | BALNEARIO CAMBORIU | BR | CARAVAN DO BRASIL |
+| CPT | SALVADOR PORT | VITORIA DA CONQUISTA | BR | CHIACCHIO |
+| FCA | ABBOTT WHSE | RIO GRANDE | AR | RIO CHICO |
+| FCA | BAHIA BLANCA | LONDRINA | BR | CRYOVAC LONDRINA |
+
+Patrón confirmado:
+- En **FCA** (2 órdenes): `DeliveryLocation` es el **punto de entrega en origen** (Abbott Whse, Bahía Blanca). La mercadería va físicamente a otro destino (Río Grande Tierra del Fuego, Londrina Brasil).
+- En **CFR/CPT** (9 órdenes): `DeliveryLocation` es el **puerto de descarga marítima**. La mercadería continúa después a la ciudad final del `Ship To` (ej: Santos → Extrema, Callao → Lima, Salvador → Vitória da Conquista). Dow paga hasta el puerto, no hasta el cliente.
+
+**Consecuencia para el schema**: el dashboard necesita **dos campos distintos**, no uno:
+- **Destino logístico / punto Incoterm** → `DeliveryLocation` + `TransportationTermsCode`. Útil para tracking del tramo que gestiona Dow/SSB.
+- **Destino físico final** → `ST.Name`, `ST.CityName`, `ST.CountryCode`. Útil para el documental (mailing, documentación final).
+
+Si el dashboard mostrara solo `DeliveryLocation` como "destino", en FCA y en CPT/CFR con continuación terrestre el documental vería información engañosa.
+
+#### Hallazgo 2 — `N1` con mail presente en el 100% de los JSONs
+
+Los 11 JSONs tienen `N1` (Notify Party) con un email válido en el array de `Contacts`. Esto valida la regla del mailing: **`N1` sirve como fallback universal** si el parseo del campo `BusinessInstructionsReferenceNumberNotes` falla o no arroja destinatarios claros.
+
+**Caveat**: 11 JSONs no garantizan que la regla valga para los 150-200/mes de producción. El dashboard debe chequear en runtime y loguear warning si alguna vez cae una orden sin mail de N1. Costo trivial, buena defensa.
+
+#### Hallazgo 3 — Concentración del mailing STO en despachantes conocidos
+
+Agrupación del `N1.Name` por tipo de orden en la muestra:
+
+| notify_name | cantidad | Tipo probable |
+|---|---|---|
+| COMISSARIA PIBERNAT | 3 | STO Brasil (despachante Dow en Brasil) |
+| CARAVAN DO BRASIL | 2 | Trade Brasil (cliente directo) |
+| CHIACCHIO | 1 | Trade Brasil |
+| CRYOVAC LONDRINA | 1 | Trade Brasil |
+| BDP INTERNATIONAL CHILE | 1 | STO Chile (despachante) |
+| TECNOLOGIA DE MATERIALES | 1 | Trade Perú |
+| RIO CHICO | 1 | Trade Argentina (Tierra del Fuego) |
+| BDP SOUTH AMERICA | 1 | STO (despachante) |
+
+Observación: en **STO** el notify es casi siempre un **despachante/forwarder intermediario conocido** (Pibernat en Brasil, BDP en Chile). En **Trade** el notify suele ser el **cliente directo** (Chiacchio, Cryovac, Tecnología de Materiales, Caravan, Rio Chico).
+
+Implicancia para la automatización del mailing (ver `business-context.md` 7bis.3):
+- **Mailing STO automatizable con tabla maestra** cliente STO → despachante_destino, sin necesidad de parseo IA.
+- **Mailing Trade requiere parseo IA** del campo de instrucciones (o fallback a N1).
+
+#### Hallazgo 4 — `DeliveryLocation` con casing inconsistente
+
+En la muestra aparecen `"NAVEGANTES PORT"` (2) y `"Navegantes Port"` (1) como 3 órdenes distintas al mismo puerto. Para SQL son 2 destinos distintos.
+
+Implicancia: el schema normalizado necesitará una **tabla maestra de destinos** (catalog) para unificar variantes. No es urgente (lo resolvemos cuando tengamos el schema normalizado), pero es un requerimiento confirmado empíricamente, no un supuesto teórico.
+
+#### Hallazgo 5 — Plantillas repetidas en el campo de instrucciones
+
+Las 3 órdenes de Pibernat tienen `BusinessInstructionsReferenceNumberNotes` de 3027 caracteres **idénticos**. Las 2 de Caravan tienen el mismo campo de 1926 caracteres idénticos. Esto sugiere que Dow usa **plantillas reutilizables** por cliente, lo cual es buena noticia para el parseo con IA en fase 2/3 — patrón estable significa mejor precisión.
+
+#### Distribución confirmada
+
+| Dimensión | Esperado (sección 7.2) | Medido | Estado |
+|---|---|---|---|
+| Trade / STO | 6 / 5 | 6 / 5 | ✅ Confirmado |
+| Marítimo / Terrestre | 8 / 3 | 8 / 3 | ✅ Confirmado |
+| Incoterms presentes | CPT, CFR, FCA | CPT, CFR, FCA | ✅ Confirmado |
 
 ---

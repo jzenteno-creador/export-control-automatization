@@ -2,7 +2,7 @@
 
 **Propósito:** guiar a Claude para que acompañe a Jona con disciplina metodológica durante todo el ciclo del proyecto (research → discovery → diseño → build → operación), evitando adelantarse, especular o saltarse el método.
 
-**Alcance de uso:** este archivo es consultado por Claude en cualquier conversación del proyecto SSB-IT-RESEARCH. Las reglas más críticas están también replicadas en las Project Instructions para aplicación inmediata.
+**Alcance de uso:** este archivo es consultado por Claude en cualquier conversación del proyecto SSB-IT-RESEARCH. Las reglas más críticas están también replicadas en las Project Instructions.
 
 ---
 
@@ -541,6 +541,36 @@ Formato:
 3. **Snippets semanales** en `snippets.md`: qué hice / qué voy a hacer / bloqueantes.
 4. **Decision log** en `decisions.md` del repo.
 
+### 5.5 Protocolo de entrega de archivos .md del proyecto
+
+Claude escribe `.md` del proyecto a dos destinos: el proyecto Claude.ai (vía `present_files` con nombre versionado `-vN`) y el repo WSL (vía Filesystem MCP, con nombre real). Durante la sesión del 22/04 aparecieron timeouts en archivos grandes (>40KB) que se resolvieron con reinicio del cliente. A partir de eso, el protocolo es el siguiente.
+
+#### Flujo condicional por tamaño estimado del archivo
+
+| Tamaño | Flujo |
+|---|---|
+| < 20KB | Escritura directa `Filesystem:write_file` a WSL. Si timeout, regenero en `/home/claude/` y entrego vía `present_files`. Costo bajo, optimización innecesaria. |
+| 20-50KB | **Flujo dual**: primero `create_file` en `/home/claude/md-entregas/`, después en paralelo `Filesystem:write_file` a WSL + `present_files` a la barra lateral. Si timeout del MCP, la copia de la barra lateral ya está, cero regeneración. |
+| > 50KB | Flujo dual + **advertencia previa** a Jona: "archivo grande, puede tardar unos segundos más". Si hay segundo timeout consecutivo → `present_files` único, avisar a Jona y sugerir reinicio del cliente. |
+
+#### Reglas fijas independientes del tamaño
+
+1. **Nunca reintentar MCP después de un timeout completo**. Un timeout de 4 min no se vuelve a intentar porque ya quemó 4 min de Jona. Pasar inmediatamente a `present_files`.
+2. **Entregar siempre la versión `-vN`** (versionado incremental) a la barra lateral, aunque el MCP haya escrito OK al repo. Es red de seguridad por si el MCP escribió contenido mal formateado.
+3. **Loguear incidentes de timeout en `sesion-actual.md`** al cerrar: archivo, tamaño, cuántos intentos tardó. Si aparecen 3 incidentes en sesiones distintas → reportar a Anthropic como bug.
+4. **Nunca escribir `sesion-actual.md` al repo WSL**. Vive solo en proyecto Claude.ai.
+5. **Nunca escribir código, SQL, migrations o configs vía Filesystem MCP sin OK explícito de Jona**. El canal MCP es solo para `.md` del proyecto.
+
+#### Prevención al inicio de sesiones largas
+
+Al arrancar una sesión que va a involucrar regeneración de 2+ archivos vivos, recordar a Jona al inicio: *"Sesión probablemente larga. Si el MCP se vuelve lento después de la primera hora, vale la pena reiniciar Claude.ai desktop antes de seguir."*. Costo: 30 segundos de Jona. Beneficio: evitar el timeout de los 4 minutos.
+
+#### Mensaje de error estándar
+
+Cuando un write falla, no reintentar ni improvisar. Mensaje exacto a Jona:
+
+> "Timeout del MCP escribiendo `ARCHIVO.md` (tamaño Xkb). Paso a `present_files` como fallback. El archivo lo tenés en la barra lateral. Si querés intentar forzar el MCP en otra sesión, reiniciá Claude.ai desktop primero."
+
 ---
 
 ## 6. Sistema de detección de fase
@@ -705,4 +735,4 @@ Escenarios típicos y respuesta correcta esperada, para calibración.
 - Las reglas críticas de aplicación permanente están también replicadas en las Project Instructions.
 - Este archivo **no se edita sin consulta a Jona**. Si surge una nueva regla o ajuste, se propone en conversación y se actualiza en conjunto.
 
-*Versión 1 — 21/04/2026*
+*Versión 2 — 22/04/2026 (cierre tarde). Cambio respecto a v1: nueva sección 5.5 "Protocolo de entrega de archivos .md del proyecto" con flujo condicional por tamaño, reglas fijas y manejo de timeouts del Filesystem MCP.*
