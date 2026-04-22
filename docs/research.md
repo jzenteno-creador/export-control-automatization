@@ -1,0 +1,716 @@
+# Research — SSB Export Dashboard
+
+**Proyecto**: SSB-IT-RESEARCH
+**Autor**: Jona Zenteno
+**Última actualización**: 22/04/2026
+**Estado**: investigación con primer Walking Skeleton desplegado. Endpoint receptor del 304 en Supabase (fase de infraestructura mínima, no MVP aún).
+
+---
+
+## 1. Objetivo del proyecto
+
+Dashboard operacional para el equipo de documentación de exportación de SSB. Reduce el equipo documental de 2 a 1 persona manteniendo 150–200 órdenes/mes.
+
+Etapas operativas a cubrir (orden cronológico, no de prioridad de desarrollo):
+
+1. Ingesta de ofrecimiento (304 desde SAP).
+2. Detección de despacho.
+3. Recolección de info para declaración de embarque.
+4. Generación/ingreso de declaración de embarque.
+5. Obtención y descarga del BL draft.
+6. Control documental del BL draft (con IA — fase posterior).
+7. Evaluación y envío de documentación al cliente (factura, CRT terrestre; foco inicial marítimo).
+8. Control de mailing.
+9. Tracking: avisos de embarque, próximo arribo, arribo.
+10. (Escalamiento futuro).
+
+**Foco inicial**: declaración de embarque + control de BL, modalidad marítima.
+
+---
+
+## 2. Arquitectura de mensajería SAP ↔ SSB
+
+```
+          304 (oferta)
+    SAP ─────────────────▶  Importer  ─── ¿? ───▶  Metric  ──301/315──▶ SAP
+                                                                (no consumidos hoy)
+```
+
+### 2.1 Mensajes SAP del ecosistema
+
+| ID | Dirección | Contenido | Rol en el dashboard |
+|----|-----------|-----------|---------------------|
+| **304** | SAP → Importer | Oferta de orden | **Input principal** (etapa 1) |
+| **301** | Metric → SAP | Aceptación de orden (coordinada y lista para despacho) | A evaluar — potencial input para estado "confirmada" (fases posteriores) |
+| **315** | Metric → SAP | Updates de eventos (sailing date, arrival at destination, etc.) | A evaluar — potencial fuente para etapa 9 tracking, complementaria o alternativa a APIs de carriers |
+
+**Nota**: el término "304" es el identificador del mensaje en contexto SAP. Internamente el Importer no lo llama así — hay que mapear cómo lo nombra en código/endpoints.
+
+### 2.2 Vínculo Importer ↔ Metric
+
+**No confirmado.** Hipótesis operativa: el Importer retransmite a Metric los datos que recibe. A validar con Brian/Santiago.
+
+El doc técnico del Importer que pasó Brian no menciona integración con Metric. Tres lecturas posibles:
+1. No hay conexión automática Importer↔Metric.
+2. Brian no la incluyó porque el pedido era solo Importer.
+3. La conexión existe pero va por fuera del código del Importer (ETL, Metric leyendo DB, etc.).
+
+---
+
+## 3. Importer — hallazgos técnicos
+
+### 3.1 Stack
+
+- **Framework**: Laravel 8 (PHP 7.3/8.0)
+- **Frontend**: AdminLTE 3 + Livewire + Alpine.js + Tailwind
+- **Auth API**: JWT (middleware `jwt.verify`) + Sanctum
+- **Docs API**: Scribe (autogenerado)
+- **Storage**: AWS S3
+- **Email**: Mailgun
+- **Auditing**: Laravel Auditing (owen-it) — audita cambios en Órdenes y Despachos SIMI
+- **Repo**: `git.ssbint.com/ssb_int_git/codego_importer_uat.git`
+- **Nombre interno del producto**: "Codego"
+- **UAT**: `https://importer.ssbplatform.com/`
+- **Docs Scribe**: `https://importer.ssbplatform.com/docs` (acceso con usuario y contraseña)
+- **Origen del desarrollo**: al parecer **Kipin** (tercero/herramienta) al inicio de la operativa con el cliente. Pregunta abierta.
+
+### 3.2 Endpoints API públicos
+
+Fuente: `routes/api.php` del repo + doc técnico de Brian.
+
+| Método | Path | Auth JWT | Uso |
+|--------|------|----------|-----|
+| POST | `/api/token` | No | Login / obtención de JWT |
+| POST | `/api/register` | No | Registro usuarios |
+| POST | `/api/orders/store` | **No** | Crear/actualizar orden (receptor del 304) |
+| POST | `/api/orders/factura` | **No** | Registrar factura de una orden |
+| POST | `/api/orders/ConsultaOrder` | Sí | Consultar órdenes por PO/tipo/fecha |
+| POST | `/api/materials/store` | Sí | Cargar materiales a una orden |
+| POST | `/api/shipments/store` | Sí | Registrar embarques |
+
+**Observación**: `/orders/store` y `/orders/factura` están fuera del JWT. Brian los lista sin marca de auth — parece ser diseño, no bug. Falta saber qué otra auth tienen (IP whitelist, HMAC, etc.). Pregunta abierta.
+
+### 3.3 Tipos de orden
+
+El Importer maneja 3 tipos:
+
+| Código | Tipo |
+|--------|------|
+| `I` | Importación |
+| `E` | **Exportación** |
+| `mro` | MRO (mantenimiento/reparaciones/operaciones) |
+
+**Confirmado**: el Importer es el repositorio central de órdenes, también exportación. Los datos de las órdenes que vamos a consumir están acá.
+
+### 3.4 Módulo "Logs de JSON" — hallazgo clave
+
+El Importer registra **todas** las integraciones recibidas vía API (JSON entrantes) con payload completo descargable. Filtrable por PO, número de embarque, estado.
+
+**Implicancia estratégica**: desbloquea el schema del 304 sin depender de Brian. Pudiendo descargar JSONs reales históricos, el schema se obtiene por inferencia directa.
+
+**Estado**: tarea completada. Se descargaron 11 JSONs reales del 304 desde el módulo Logs de JSON. Análisis documentado en sección 7.
+
+### 3.5 Módulos de la plataforma (resumen)
+
+Doc técnico completo pasado por Brian. Módulos principales:
+
+1. **Órdenes** — central, maneja I/E/MRO.
+2. **Despachos / SIMI** — importa despachos aduaneros.
+3. **Embarques** — carrier, vessel, contenedor, modo de transporte.
+4. **Consumos temporales** — admisión temporaria.
+5. **Seriales de cilindros** — stock de cilindros industriales.
+6. **Pagos MRO**.
+7. **Tránsitos y temporales** — plazos de admisión temporaria.
+8. **Facturas de orden**.
+9. **Logs de JSON** — auditoría de integraciones API.
+10. **Administración** — catálogos maestros.
+
+Los módulos relevantes para el dashboard de exportación: **Órdenes**, **Embarques**, **Facturas**, **Logs de JSON**.
+
+### 3.6 Flujo típico documentado por Brian
+
+```
+1. SAP → POST /api/orders/store      → Crea Orden
+2. SAP → POST /api/orders/factura    → Factura comercial
+3. SAP → POST /api/shipments/store   → Embarque
+4. Operador sube SIMI desde aduana   → Despacho vinculado
+5. Operador actualiza follow-up Excel → Estado embarque
+6. Temporales: plazos y consumos
+7. Notificaciones por Mailgun
+```
+
+**Atención**: este flujo describe **importación** (pasos 4, 6). Para **exportación** el flujo puede ser diferente — no está documentado. Pregunta abierta.
+
+### 3.7 Deuda técnica y semántica
+
+- Archivos duplicados con guion bajo (backups viejos conviviendo con activo): `composer_.json`, `routes/web_.php`, `database_/`, `config/logging.php_old`.
+- `data.txt` (172 KB) y `t.txt` (38 KB) en raíz: dumps de debug viejos (Maatwebsite/Excel). Basura.
+- `README.md` es default de Laravel. **Cero documentación interna del proyecto**.
+- Julio confirmó: "3 generaciones, 6 devs". Reconstruir contexto leyendo código sin validación con Brian/Santiago es riesgoso.
+
+---
+
+## 4. Metric — investigado (22/04/2026)
+
+**Investigación realizada con Claude Code sobre el repo `sosab-api` clonado en `~/projects/metric-api`. Hallazgos documentados acá.**
+
+### 4.1 Stack real
+
+- **Framework**: Flask (Python), no FastAPI. Patrón Blueprint.
+- **Base de datos**: MySQL (vía `config/db_connection.py`).
+- **Repo**: `git.ssbint.com/ssb_int_git/sosab-api.git`
+- **Entry point**: `wsgi.py` + `myproject.py` (171 KB, monolítico).
+- **Estructura**: archivos Python planos en raíz + carpetas `routers/`, `schemas/`, `services/`, `models/`, `utils/`, `Importer/`, `interlog_API/`, `data_management/`, `dow_dashboard/`.
+- **Deuda técnica visible**: archivos vacíos (`editeta.py`, `eidtata.py`, `PagosMro.php`), archivos con nombres raros (`'how stash@{43ebecc}'`), logs grandes (`document_scanner_test.log` 190 KB, `upload_errors_backup.log` 100 KB), `sync_log.db` en repo.
+
+### 4.2 Cómo recibe el 304 de SAP
+
+**Endpoint**: `POST /gestor-expo/api/orders/store-complete`
+
+- Archivo: `Importer/Gestion_Carpetas/Expo/gestor_expo.py:899` — función `store_complete_order`.
+- Registrado con `url_prefix='/gestor-expo'` en `myproject.py:4555`.
+- Docstring del endpoint dice: *"Replica completa del método store() de Laravel"*. Confirma que SAP envía el 304 a **dos lugares en paralelo**: al Importer Laravel (`/api/orders/store`) y a Metric (`/gestor-expo/api/orders/store-complete`). **No hay retransmisión Importer → Metric** — son dos ingresos simultáneos del mismo mensaje.
+- Parsea el schema del 304 confirmado en sección 7: `ReferenceIdentificationGeneral`, `ShipmnetIdentificationNumber` (con el typo característico), `DateTimeReference` (RSD/002/AA8), `Entities`, `RouteInformation`, `Items`, `BusinessInstructionsReferenceNumberNotes`.
+
+### 4.3 Cómo persiste Metric el 304
+
+**No lo guarda crudo**. Lo parsea y lo distribuye en ~10 tablas MySQL:
+
+| Tabla | Contenido |
+|---|---|
+| `orders` | Orden (INSERT/UPDATE por `purchase_order`) |
+| `shipments` | Embarques (por `shipment_number` + `order_id`) |
+| `pivot_entities` | Entidades del embarque (una fila por entidad, INSERT incondicional) |
+| `route_informations` | Rutas (INSERT incondicional) |
+| `materials`, `products`, `container_types`, `contacts`, `companies`, `currencies`, `incoterms`, `entities` | Catálogos + relaciones |
+
+**Único campo crudo retenido**: `BusinessInstructionsReferenceNumberNotes` → `shipments.ref_notes`.
+
+**Implicancia crítica para nosotros**: si el dashboard consumiera el 304 desde Metric (opción D de sección 5.1), **el JSON original ya está perdido**. Habría que reconstruirlo con joins (es lo que hacen las funciones `create_general_304` y `create_material_304` — ver 4.5).
+
+### 4.4 Salidas / eventos cuando Metric recibe un 304
+
+**Ninguna.** La función `store_complete_order` al recibir un 304:
+1. Inserta/actualiza en las tablas.
+2. `conn.commit()`.
+3. Responde `{order_id, shipment_id, items_count}` con status 200.
+4. Fin.
+
+No dispara webhook saliente, no emite evento a cola, no manda mail, no llama a n8n. Si el dashboard quisiera enterarse del 304 vía Metric, habría que modificar el código de Metric (opción C, descartada).
+
+Salidas presentes en otros lugares del repo (no atadas al ingreso del 304):
+- `myproject.py:3391-3400`: endpoint `post()` que hace `requests.post('https://rica.elemica.com/upload/SSB_Prod', ...)` — emisión del **315 a Elemica** (middleware B2B de Dow), pero triggered desde el frontend, no desde `store-complete`.
+- `send301.py` / `send315.py`: solo escriben tablas locales `report_301` / `report_315`, no envían a SAP (el nombre es engañoso).
+
+### 4.5 Las funciones `create_general_304` y `create_material_304`
+
+Están en `expomaterials.py:1268` y `expomaterials.py:1393`.
+
+**No son receptores** — son **reconstructores**. Toman un `creator: str` (el PO), corren un `SELECT` con múltiples `JOIN` contra `orders`, `shipments`, `pivot_entities`, `entities`, `cities`, `vessels`, `currencies`, `plants`, `materials`, y devuelven un JSON con **forma** de 304 sintetizado desde la DB.
+
+No escriben a DB, no hacen HTTP outbound. Probable uso: UI interna, generación de PDFs, consumers internos que necesitan ver el "304 equivalente" de una orden existente.
+
+### 4.6 Endpoints proxy `/get-304/*`
+
+`myproject.py:2521-2584` expone `GET /get-304`, `GET /get-304-by-id/<id>`, `POST /post-304/`. Son **proxies HTTP** a `http://localhost:3008/ssbint/trescientoscuatro/`. Qué corre en el puerto 3008 no está en el repo `sosab-api` — probablemente un servicio Node separado que almacena 304s originales. **Pregunta abierta** (no crítica para el MVP).
+
+### 4.7 Riesgos identificados en el código de Metric
+
+1. **Idempotencia sospechosa**: `pivot_entities` y `route_informations` hacen INSERT incondicional al recibir un 304. Si SAP reenvía el mismo 304 (reintento de red, reproceso), probablemente se duplican filas en esas tablas. **No confirmado en producción**, pero el código sugiere que sí ocurre. Riesgo si el dashboard dependiera de la consistencia de Metric.
+2. **Campos ignorados del 304**: `TariffServiceCode`, `ApplicationType`, `TransactionSetPurposeCode`, `ShipmentMethodPayment`, `PlaceOfReceiptCode`, `PlaceOfDelivery`, qualifiers `CO`, `AEG`, `1V`, sub-qualifiers de ítem (`PGIDATE`, `PAYMTRMS`, `DELIVERY`, `OCEAN CSGN`), `Hazardous`, etc. No vi código que los procese en `store_complete_order`. Confirmado por lectura pero no exhaustivo.
+3. **Auth del endpoint**: no tiene decoradores visibles. ¿IP whitelist en nginx? ¿Reverse proxy? No documentado.
+
+### 4.8 Consecuencia para la decisión de integración
+
+Con lo investigado, **Metric no es candidato viable** para que el dashboard consuma el 304 desde allí. Razones:
+- No persiste el crudo (rompe criterio no-negociable #5 de `plan.md`).
+- No es idempotente (rompe criterio no-negociable #2).
+- No emite eventos salientes al recibir un 304.
+- Repo legacy sin tests visibles, mantenido por programadores externos.
+
+**Decisión arquitectónica derivada**: consumir el 304 desde el **Importer Laravel**, no desde Metric. El Importer sí persiste crudo en su módulo "Logs de JSON" y Brian es dev accesible interno. Ver `plan.md` sección 7, decisión del 22/04 sobre integración via webhook desde Importer.
+
+---
+
+## 5. Estrategia de integración (preliminar — a validar)
+
+### 5.1 Para recibir el 304
+
+Opciones evaluadas (actualizado 22/04 post-investigación de Metric):
+
+| Opción | Descripción | Estado | Pros | Contras |
+|--------|-------------|--------|------|---------|
+| A | SAP envía el 304 también al dashboard (doble ingesta) | **Descartada** | Desacoplado del Importer | Requiere cambio en SAP — Dow no lo hace |
+| B | Importer reenvía al dashboard vía webhook (HTTP POST del payload crudo después de recibirlo) | **Elegida (22/04)** | El Importer ya persiste crudo; Brian accesible; respeta criterios #2 y #5 | Requiere dev en Importer (Brian) |
+| C | Dashboard hace pull al Importer vía `ConsultaOrder` | Descartada | Sin cambios en terceros | Latencia, no event-driven, riesgo de perder órdenes |
+| D | Dashboard consume desde Metric | **Descartada post-investigación (22/04)** | — | Metric no persiste crudo (rompe criterio #5); no idempotente (rompe criterio #2); sin webhooks salientes; repo legacy mantenido por externos. Ver sección 4.8. |
+
+**Decisión del 22/04**: Opción B. Pedido formal enviado a Brian. Walking Skeleton del receptor desplegado en Supabase. Ver `plan.md` sección 7 y `docs/walking-skeleton.md`.
+
+---
+
+## 6. Glosario
+
+- **304**: mensaje SAP de oferta de orden → Importer.
+- **301**: mensaje SAP de aceptación de orden → desde Metric hacia SAP.
+- **315**: mensaje SAP de update de evento (sailing, arrival) → desde Metric hacia SAP.
+- **BL / BL draft**: Bill of Lading / su versión borrador para revisión previa a emisión.
+- **CRT**: Carta de Porte Internacional por Carretera (transporte terrestre).
+- **Codego**: nombre interno del producto Importer.
+- **EDI X12**: *Electronic Data Interchange* formato ANSI ASC X12. Estándar estadounidense de mensajería B2B estructurada. El 304 es un "Transaction Set" dentro de X12.
+- **GMID**: *Global Material Identifier*. Código interno Dow para identificar cada producto del catálogo. En los JSONs aparece con leading zeros como número de 18 dígitos.
+- **IDOC SHPMNT**: tipo de documento SAP (`SHPMNT03`, `SHPMNT05`, `SHPMNT06`) que SAP usa internamente para representar una orden de embarque antes de serializarla a X12 o JSON.
+- **Kipin**: *a definir* — posible desarrollador/herramienta original del Importer.
+- **MOT**: *Mode of Transport*. Modalidad de transporte (marítimo, terrestre, aéreo).
+- **Metric**: plataforma core de SSB (repo `sosab-api`).
+- **NCM**: Nomenclatura Común del Mercosur. Código arancelario argentino/brasileño de 8 dígitos.
+- **Qualifier** (en EDI): en X12 muchos elementos son pares *qualifier + value*: el qualifier define qué tipo de dato es el value. Ejemplo: `PO` + `0118705352` significa "Purchase Order Number = 0118705352".
+- **Scribe**: librería Laravel para autogenerar docs de API REST.
+- **SIMI**: Sistema de Importaciones de la República Argentina.
+- **MRO**: *Maintenance, Repair and Operations*.
+- **UN/LOCODE**: *United Nations Code for Trade and Transport Locations*. Código de 5 caracteres (2 país + 3 lugar) para identificar puertos y ciudades. Ej: `BRSSZ` = Santos, Brasil.
+
+---
+
+## 7. Estructura del JSON del 304 (Dow/PBB Polisur → Importer)
+
+Esta sección documenta la estructura real de los JSONs que SAP de Dow envía al endpoint `/api/orders/store`. Basada en análisis directo de **11 JSONs reales** descargados del módulo Logs de JSON del Importer. Foco: solo campos que efectivamente aparecen en estos JSONs, con interpretación operativa de Jona + contexto técnico X12.
+
+### 7.1 Origen del formato
+
+El JSON es una serialización sabor SAP del **EDI X12 Transaction Set 304 "Shipping Instructions"**. El nombre de los campos sigue la convención interna SAP/Dow más que X12 puro. La estructura y los qualifiers usados son estándar X12, con extensiones propias Dow.
+
+Flujo real de generación: `SAP (Sales Order) → Outbound Delivery → Shipment Document → IDOC SHPMNT → middleware B2B → JSON al Importer`.
+
+**Para este proyecto**: el formato no va a cambiar. No hay que interpretar el estándar X12 en abstracto, solo este dialecto Dow.
+
+### 7.2 Observaciones generales de los 11 JSONs
+
+Constantes en todos los JSONs:
+- `RoutingNumber`: siempre `33708426259` (constante Dow).
+- `TransactionSetPurposeCode`: siempre `"49"` (Original - No Response Necessary).
+- `ApplicationType`: siempre `"BN"` (Booking).
+- `ShipmentMethodPayment`: siempre `"PP"` (Prepaid).
+- `CurrencyCode`: siempre `"USD"`.
+- Exportador (`EntityIdentifier: EX`): siempre `PBBPOLISUR S.R.L.` con `IdentificationCode: A136`.
+- Endpoint destino: siempre `"q": "/api/orders/store"`.
+
+Variables clave (dimensiones que discriminan tipos de orden):
+- **PO prefix**: `0118...` (6 JSONs) vs `4010...` (5 JSONs). **Confirmado (22/04)**: `0118...` = **Trade** (venta a cliente externo), `4010...` = **STO** (Stock Transfer Order, intercompany Dow → Dow). Prefijo estable. Ver `business-context.md` sección 4.3 para consecuencias operativas.
+- **MOT** (`RouteInformation[].TransportationMethodTypeCode`): `O` (marítimo, 8 JSONs) vs `M` (terrestre, 3 JSONs).
+- **IntermodalServiceCode**: `05` (marítimo contenedor 40', 8 JSONs) vs `01` (terrestre, 3 JSONs).
+- **TariffServiceCode**: `DD` (Door-to-Door, 6 JSONs) vs `DP` (Door-to-Port, 5 JSONs).
+- **Incoterm** (`TransportationTermsCode`): CPT, CFR, FCA (tres variantes en los 11 JSONs).
+
+### 7.3 Estructura de alto nivel
+
+Todo JSON del 304 tiene 7 zonas principales:
+
+```
+{
+  "RoutingNumber": ...,                         // metadata Dow
+  "ShipmnetIdentificationNumber": ...,          // ID de shipment SAP (nótese typo)
+  "TariffServiceCode": ...,                     // tipo de servicio (DD/DP)
+  "ShipmentMethodPayment": "PP",                // siempre prepaid
+  "TransactionSetPurposeCode": "49",            // siempre original
+  "ApplicationType": "BN",                      // siempre booking
+  "ReferenceIdentificationGeneral": [...],      // referencias nivel orden (PO, CO, etc.)
+  "CurrencyCode": "USD",
+  "TransportationTermsCode": ...,               // Incoterm
+  "DeliveryLocation": ...,                      // destino (texto libre)
+  "TermsOfSale": 0 o 31,                        // código numérico condición de pago
+  "TermsOfSaleDescription": "...",              // texto libre condición de pago
+  "DateTimeReference": [...],                   // fechas clave
+  "Entities": [...],                            // actores del embarque
+  "PlaceOfReceiptCode": ...,                    // código de sitio origen
+  "PlaceOfDelivery": ...,                       // opcional (solo 1/11 lo trae)
+  "RouteInformation": [...],                    // MOT + ruta
+  "BusinessInstructionsReferenceNumberNotes": "...",  // TEXTO LIBRE CRITICO
+  "Items": [...],                               // productos + contenedores
+  "q": "/api/orders/store"                      // endpoint destino
+}
+```
+
+### 7.4 Campos del encabezado (nivel orden)
+
+#### Identificadores
+
+| Campo JSON | Tipo | Descripción operativa | Ejemplo |
+|---|---|---|---|
+| `ShipmnetIdentificationNumber` | string | Número de shipment de SAP. **Nombre del campo viene con typo** (falta una `e` en "Shipment"). Se muestra como secundario en el dashboard. | `"0048062233"` |
+| `RoutingNumber` | number | Identificador del routing de Dow. Constante en todos los JSONs. Metadata técnica, no operativa. | `33708426259` |
+
+#### Códigos de servicio y pago
+
+| Campo JSON | Valores vistos | Significado | Relevancia dashboard |
+|---|---|---|---|
+| `TariffServiceCode` | `DD`, `DP` | DD = Door-to-Door (retiro en planta, entrega en domicilio destino). DP = Door-to-Port (retiro domicilio, entrega en terminal destino). | **Alta** — define alcance del servicio |
+| `ShipmentMethodPayment` | `PP` | Prepaid (flete pagado en origen). Constante en los 11 JSONs. | Baja — sin variación |
+| `TransactionSetPurposeCode` | `49` | Original - No Response Necessary. Constante. | Baja — sin variación |
+| `ApplicationType` | `BN` | Booking. Constante. | Baja — sin variación |
+| `CurrencyCode` | `USD` | Moneda. Constante. | Baja — sin variación |
+
+#### Términos comerciales
+
+| Campo JSON | Valores vistos | Significado |
+|---|---|---|
+| `TransportationTermsCode` | `CPT`, `CFR`, `FCA` | Incoterm 2020. CPT = Carriage Paid To. CFR = Cost and Freight. FCA = Free Carrier. |
+| `DeliveryLocation` | texto libre | Puerto o ciudad de destino. Ej: `"SALVADOR PORT"`, `"Navegantes Port"`, `"BAHIA BLANCA"`, `"MAIPU"`, `"CALLAO PORT"`. **Sin normalizar** — inconsistencia de casing entre JSONs. |
+| `TermsOfSale` | `0`, `31` | Código numérico de condición de pago. `0` = términos inmediatos/especiales (se lee del texto), `31` = "NET EOM PLUS 1 MO PLUS 1 DAY". |
+| `TermsOfSaleDescription` | texto libre | Descripción humana de la condición de pago. Ej: `"60 DAYS AFTER B/L DATE"`, `"NET 60 DAYS FROM INVOICE DATE"`, `"75 DAYS FROM INVOICE DATE - DATED DRAFT"`. |
+
+### 7.5 ReferenceIdentificationGeneral (referencias nivel orden)
+
+Array de pares `ReferenceIdentificationQualifier` + `ReferenceIdentification`. Los qualifiers encontrados en los 11 JSONs:
+
+| Qualifier | Frecuencia | Significado | Ejemplo de valor | Criticidad |
+|---|---|---|---|---|
+| `PO` | 11/11 | **Purchase Order Number**. Identificador principal de la orden. | `"0118705352"`, `"4010470219"` | **Máxima** — ID principal |
+| `19` | 11/11 | Pier/muelle | `"0803"` | Metadata |
+| `11` | 11/11 | Account Number | `"Z013"`, `"Z039"` | Metadata |
+| `PE` | 11/11 | Plant Number (punto de despacho, "shipping point" SAP) | `"P703"`, `"P706"`, `"P749"` | Media — trazabilidad |
+| `SF` | 11/11 | Ship From (planta física origen) | `"D116"`, `"D146"`, `"D147"`, `"D176"` | Media — trazabilidad |
+| `CO` | 6/11 | Contract Number (referencia contractual comercial) | `"37111"`, `"PD2026/102097"`, `"230N_04_2026_138"` | Media — solo algunas órdenes |
+| `1V` | 6/11 | Related Vendor Order Number (orden vendor secundaria). Aparece solo en POs `0118...`. | `"0118705352"` (mismo valor que PO) | Baja |
+| `AEG` | 6/11 | No es qualifier X12 estándar. Dow lo usa con `FreeFormDescription: "AES - Ultimate Consignee Type"`. **Extensión Dow**. Aparece solo en POs `0118...`. | `"DIRECT CONSUMER"` | Baja — metadata regulatoria US-AES |
+
+**Observación**: los qualifiers `1V`, `CO` y `AEG` aparecen solo en las órdenes tipo `0118...`. Las órdenes `4010...` traen una versión mínima de este array (solo `19`, `11`, `PE`, `SF`, `PO`). Esto refuerza que son dos tipos de orden SAP distintos.
+
+### 7.6 DateTimeReference (fechas clave)
+
+Array de pares `DateTimeQualifier` + `Date`. Ambos qualifiers aparecen en los 11 JSONs:
+
+| Qualifier | Significado | Ejemplo | Relevancia |
+|---|---|---|---|
+| `RSD` | Requested Ship Date (fecha solicitada de despacho). **No figura en el catálogo X12 estándar** — convención SAP. | `20260425` (YYYYMMDD) | **Alta** — marca cuándo debe salir |
+| `002` | Delivery Requested (fecha de entrega requerida al comprador) | `20260526` | **Alta** — ETA contractual |
+
+Formato: entero `YYYYMMDD` (ejemplo: `20260425` = 25 abr 2026).
+
+### 7.7 Entities (actores del embarque)
+
+Array de actores. Cada entidad tiene estructura:
+
+```json
+{
+  "EntityIdentifier": "ST",
+  "Name": "...",
+  "IdentificationCode": "...",
+  "TAXID": "...",
+  "AddressInformation": "...",
+  "CityName": "...",
+  "PostalCode": "...",
+  "CountryCode": "...",
+  "LocationIdentifier": "...",
+  "Contacts": [
+    {
+      "ContactFunctionCode": "...",
+      "Name": "...",
+      "ElectronicMail": "...",
+      "Telephone": "..."
+    }
+  ]
+}
+```
+
+Roles encontrados (`EntityIdentifier`) con frecuencia en los 11 JSONs:
+
+| Code | Frecuencia | Rol | Quién es típicamente |
+|---|---|---|---|
+| `16` | 11/11 | Plant (punto de despacho / sede logística) | Planta PBB Polisur o warehouse Dow (Bahía Blanca, Abbott) |
+| `EX` | 11/11 | Exportador | **Siempre PBBPOLISUR S.R.L. (A136)** — constante |
+| `ST` | 11/11 | Ship To (destinatario físico) | Cliente final o hub Dow destino |
+| `N1` | 11/11 | Notify Party | Despachante o cliente del lado importador |
+| `BT` | 11/11 | Bill To (a quién facturar) | Generalmente = Ship To, salvo trade con intermediarios |
+| `NP` | 11/11 | Notify Party secundario | Segundo notify (banco, agente, partner logístico) |
+| `DIR` | 10/11 | Distribution Recipient | Destinatario de distribución posterior o responsable específico |
+| `PK` | 7/11 | Packer (empaque) | Partner que empaca o procesa |
+| `AO` | 4/11 | Account Of ("por cuenta de") — **en estos JSONs representa el puerto de destino** | Puerto físico (ej: SALVADOR PORT, CALLAO PORT) |
+| `CN` | 3/11 | Consignee del BL | Consignatario formal (aparece solo en algunos casos) |
+| `PK2` | 2/11 | Packer secundario | Segundo empacador (multi-site o sub-rol) |
+| `PK3` | 1/11 | Packer terciario | Tercer empacador |
+
+**Observación crítica**: en la mayoría de los JSONs, `ST` + `N1` + `BT` refieren a la misma empresa (el cliente final). Cuando divergen, indica que el cliente factura a una empresa pero recibe mercadería en otra, o que hay un intermediario notify (forwarder, despachante, banco). Detectar estas divergencias es señal clave para documentación.
+
+**Campos de entidad**:
+
+| Campo | Descripción | Notas |
+|---|---|---|
+| `Name` | Razón social | A veces truncado (ej: `"CHIACCHIO INDUSTRIA DE"`) |
+| `IdentificationCode` | ID interno SAP del business partner | Numérico con leading zeros |
+| `TAXID` | CUIT, CNPJ, RUT, etc. según país | Solo presente en algunas entidades (ST, BT) |
+| `AddressInformation` | Dirección | Texto libre, a veces concatenado |
+| `LocationIdentifier` | Abreviatura de estado/provincia o código interno | **No es UN/LOCODE estándar**. Valores vistos: `B`, `C`, `BA`, `SC`, `SP`, `PR`, `RM`, `LIM`, `V`, `MG`, `MEX`. Normalización pendiente. |
+
+**`ContactFunctionCode`** (dentro de Contacts):
+
+| Code | Significado | Uso |
+|---|---|---|
+| `ZZ` | Mutually Defined (definido bilateralmente) | Contacto general, uso más frecuente (42 ocurrencias) |
+| `CN` | General Contact | 36 ocurrencias |
+| `RE` | Receiving Contact | Contacto de recepción (típico en `ST`), 11 ocurrencias |
+
+### 7.8 RouteInformation (ruta y modo de transporte)
+
+Array de 1 elemento en los 11 JSONs. Estructura:
+
+```json
+{
+  "StandardCarrierAlphaCode": "SSB",
+  "TransportationMethodTypeCode": "O",
+  "FreeFormDescription": "053109",
+  "RouteDescription": "TM-ST05-TT31-TLT09"
+}
+```
+
+| Campo | Significado |
+|---|---|
+| `StandardCarrierAlphaCode` | SCAC. Siempre `"SSB"` en estos JSONs — indica que SSB International es el carrier/forwarder asignado. **A confirmar si SSB está registrado en NMFTA o si es código bilateral Dow↔SSB**. |
+| `TransportationMethodTypeCode` | **O** (Containerized Ocean) o **M** (Motor/terrestre). **Campo crítico** — distingue marítimo de terrestre. |
+| `FreeFormDescription` | Código corto que parece codificar ruta (ej: `"053109"`, `"010701"`). Interpretación Dow-specific, a confirmar. |
+| `RouteDescription` | Descripción codificada de la ruta. Ej: `"TM-ST05-TT31-TLT09"` para marítimo, `"LAA-CUST-PCKUP-AR-FTL EXPORT-0DAY-01"` para terrestre. |
+
+### 7.9 BusinessInstructionsReferenceNumberNotes (TEXTO LIBRE CRITICO)
+
+Campo string con instrucciones del exportador al forwarder. **Es el campo de mayor valor operativo y el de mayor dificultad de automatización**.
+
+**Contenido operativo** (confirmado por Jona):
+- Qué documentación debe enviarse y a qué direcciones.
+- Instrucciones específicas para el BL (qué debe decir, qué NCM declarar, datos del consignee/notify).
+- Instrucciones para certificado de origen, packing list, factura.
+- Instrucciones regulatorias por país de destino (ej: CNPJ obligatorio en BL para Brasil, ISPM 15 para pallets de madera).
+- Casos especiales: direct collect al banco, wooden package, freight collect vs prepaid.
+
+**Estadísticas de los 11 JSONs**:
+
+| Longitud del campo | Cantidad de JSONs |
+|---|---|
+| < 100 chars | 2 (mínimo: 44 chars) |
+| 100 - 1000 chars | 3 |
+| 1000 - 2000 chars | 2 |
+| 2000 - 3000 chars | 1 |
+| 3000+ chars | 3 (máximo: 3027 chars) |
+
+**Estructura interna** (semi-estructurada, no estándar al 100%):
+- Usa marcadores tipo `#12A#`, `#13A#`, `#15B#` (códigos de tipo de instrucción).
+- Caracteres especiales escapados con `#` (reemplaza `ñ`, `ç`, etc. y símbolos `%`, `&`).
+- Saltos de línea inconsistentes (a veces `,,` como separador).
+- Dos variantes observables: estructurada con marcadores `#XX#` y de texto libre sin marcadores.
+
+**Implicancia para el dashboard**: este campo es el candidato #1 para automatización con IA en fase 2/3. Hoy el equipo documental lo lee manualmente en cada orden. Parsearlo permitiría:
+- Auto-armar el mailing a las direcciones correctas.
+- Detectar requisitos especiales del BL antes de cargar en el portal de la naviera.
+- Flagear casos especiales (direct collect, freight collect, requisitos regulatorios).
+
+**En el schema**: persistir el texto completo crudo sin transformar, hasta que exista modelo de parseo validado.
+
+### 7.10 Items (productos + contenedores)
+
+Array de ítems. Cada ítem representa un producto dentro de un contenedor (o grupo de contenedores). Un JSON puede tener 1 a N ítems. En los 11 JSONs vimos ítems con una estructura consistente:
+
+```json
+{
+  "ContainerDetails": [...],
+  "ReferenceIdentification": [...],
+  "BusinessInstructionsAndReferenceNumber": [...],
+  "QuantityAndWeight": [...],
+  "PricingInformationUnitPrice": ...,
+  "PricingInformationQuantity": ...,
+  "PricingInformationMonetaryAmount": ...,
+  "ExchangeRateCurrencyCode": "USD",
+  "ExchangeRate": ...,
+  "DescriptionMarksAndNumbers": [...],
+  "ItemIdentification": [...],
+  "LJ": "N",
+  "Hazardous": [],
+  "Remarks": "..."
+}
+```
+
+#### ContainerDetails
+
+```json
+{
+  "NumberOfContainers": 2,
+  "IntermodalServiceCode": "05",
+  "EquipmentType": "40CZ",
+  "EquipmentNumber": "40CMISSING",
+  "SealNumber": "NA"
+}
+```
+
+| Campo | Valores vistos | Significado |
+|---|---|---|
+| `NumberOfContainers` | 1, 2, 3, 4 | Cantidad de contenedores asignados al ítem |
+| `IntermodalServiceCode` | `01`, `05` | **01** = terrestre (7 ocurrencias). **05** = marítimo contenedor completo (24 ocurrencias). Input de Jona: codifica tipo de exportación (contenedor completo, presurizado, aéreo, bulk). |
+| `EquipmentType` | `40CZ`, `VAEM` | **40CZ** = contenedor marítimo 40 pies (no es ISO 6346 estricto, es código Dow-specific). **VAEM** = equipo terrestre (camión/van, sin contenedor marítimo). |
+| `EquipmentNumber` | `40CMISSING`, `XNOTFOUNDX` | Placeholder — el número real del contenedor aún no se asignó cuando Dow genera el 304 (se conoce recién en despacho). |
+| `SealNumber` | `NA` | Mismo motivo — precinto se asigna en despacho. |
+
+#### ReferenceIdentification (nivel ítem)
+
+Similar al nivel orden, qualifiers encontrados:
+
+| Qualifier | Significado |
+|---|---|
+| `PO` | Purchase Order (mismo PO de la orden) |
+| `CO` | Contract Number (si aplica) |
+| `DP` | Delivery Point (código interno SAP del punto de despacho) |
+
+#### BusinessInstructionsAndReferenceNumber (sub-qualifiers Dow)
+
+Array de pares `ReferenceIdentification` + `Description`. **No son qualifiers X12 estándar** — son nombres de campos SAP/Dow transportados en el segmento L11:
+
+| Sub-qualifier | Frecuencia | Significado | Ejemplo |
+|---|---|---|---|
+| `PGIDATE` | 31/31 ítems | **Post Goods Issue Date**. Fecha de planificación de despacho SAP. Formato YYYYMMDD. | `"20260425"` |
+| `PAYMTRMS` | 31/31 ítems | **Payment Terms**. Descripción textual de condición de pago. Redundante con `TermsOfSaleDescription` del encabezado. | `"60 DAYS AFTER B/L DATE"` |
+| `DELIVERY` | 31/31 ítems | **Delivery Number**. Número de documento de entrega SAP (VBELN del LIKP). Vincula el ítem con el flujo documental SAP. | `"0831636939"` |
+| `OCEAN CSGN` | 7/31 ítems | **Ocean Consignment**. Aparece solo en algunos JSONs marítimos. Contiene datos del consignee en texto libre. | `"Caravan do Brasil Trading Ltda ..."` |
+
+**Observación**: `PGIDATE`, `PAYMTRMS` y `DELIVERY` siempre aparecen juntos y son **esenciales para trazabilidad SAP**. `OCEAN CSGN` es una extensión que duplica datos del consignee ya presentes en Entities.
+
+#### QuantityAndWeight
+
+```json
+{
+  "GrossWeight": 27540,
+  "ActualNetWeight": 27000,
+  "BilledRatedWeight": 1080,
+  "Volume": 45.522,
+  "LadingQuantity": 1080,
+  "PackagingFormCode": "BAG"
+}
+```
+
+| Campo | Significado |
+|---|---|
+| `GrossWeight` | Peso bruto en kg (incluye packaging) |
+| `ActualNetWeight` | Peso neto real en kg |
+| `BilledRatedWeight` | Peso facturable (en unidades de packaging, no kg). **Típicamente coincide con `LadingQuantity`**. |
+| `Volume` | Volumen en m³ (metros cúbicos) |
+| `LadingQuantity` | Cantidad de bultos |
+| `PackagingFormCode` | Tipo de envase. Siempre `"BAG"` en los 11 JSONs (resinas en bolsas de 25 kg). |
+
+#### Pricing
+
+| Campo | Significado |
+|---|---|
+| `PricingInformationUnitPrice` | Precio unitario |
+| `PricingInformationQuantity` | Cantidad |
+| `PricingInformationMonetaryAmount` | Monto total del ítem (= unit × quantity) |
+| `ExchangeRateCurrencyCode` | Moneda de tipo de cambio (siempre `"USD"`) |
+| `ExchangeRate` | Tipo de cambio informado |
+
+#### DescriptionMarksAndNumbers
+
+```json
+{
+  "LadingDescription": "DOWLEX(tm) TG 2085B Polyethylene Resin",
+  "CommodityCode": "000000000000374367"
+}
+```
+
+| Campo | Significado |
+|---|---|
+| `LadingDescription` | Nombre comercial del producto Dow. |
+| `CommodityCode` | **GMID de Dow**, no HS code. Numérico de 18 dígitos con leading zeros. El significant number (últimos 6 dígitos) identifica el material en SAP. **Importante**: no se puede usar este campo directamente para declaración aduanera — el NCM/HS real hay que tomarlo de otra fuente. |
+
+#### ItemIdentification
+
+```json
+{
+  "ProductServiceIDQualifierVo": "0831636939",
+  "ProductServiceIDQualifierVs": "000010",
+  "ReferenceIdentificationItem": [
+    {"ReferenceIdentification": "ITEMDESC", "FreeFormDescription": "..."},
+    {"ReferenceIdentification": "DGTXT", "FreeFormDescription": "..."},
+    {"ReferenceIdentification": "HAZPROPERNAME1", "FreeFormDescription": "..."}
+  ]
+}
+```
+
+| Campo | Significado |
+|---|---|
+| `ProductServiceIDQualifierVo` | **VO** en X12 = Vendor's Order Number. El número es el Delivery SAP. |
+| `ProductServiceIDQualifierVs` | **VS no es qualifier X12 estándar**. El número es el ítem de la delivery (10, 20, 30...). Probable convención Dow. |
+| `ReferenceIdentificationItem[].ITEMDESC` | Descripción extendida del ítem con unidad y packaging. |
+| `ReferenceIdentificationItem[].DGTXT` | **Dangerous Goods Text** — texto regulatorio de peligrosidad (`"Not regulated for transport"` en todos los JSONs, son resinas no peligrosas). |
+| `ReferenceIdentificationItem[].HAZPROPERNAME1` | **Hazardous Proper Name 1** — nombre regulatorio UN (IMDG/IATA). En estos JSONs siempre `"Not regulated for transport"`. |
+
+#### Otros campos de ítem
+
+| Campo | Valor en los 11 JSONs | Significado |
+|---|---|---|
+| `LJ` | Siempre `"N"` (31/31) | Campo X12 estándar "LJ" = Local Jurisdiction. Con valor `N` probablemente es un flag Y/N Dow-specific (no es jurisdicción). Pendiente confirmar. |
+| `Hazardous` | Siempre `[]` (vacío) en los 11 JSONs | Array de datos de peligrosidad. Vacío porque son resinas no reguladas. Estructura a confirmar cuando aparezca una orden de producto peligroso. |
+| `Remarks` | Texto libre, opcional | Aparece en ítems que son "copias" de otro (repetición del producto en otro contenedor). Contiene `"Marking Instructions:..."`. |
+
+### 7.11 Clasificación de campos para el schema
+
+Para el diseño de Supabase, clasificación por criticidad operativa (basado en input de Jona + análisis de JSONs):
+
+**Categoría A — Críticos para el dashboard (se muestran/operan con ellos diariamente)**
+
+- `PO` (de `ReferenceIdentificationGeneral`) — identificador principal visible.
+- `ShipmnetIdentificationNumber` — ID secundario.
+- `TransportationMethodTypeCode` (MOT: O/M) — discrimina marítimo/terrestre.
+- `IntermodalServiceCode` — tipo de exportación.
+- `TransportationTermsCode` (Incoterm).
+- `DeliveryLocation` (puerto/destino).
+- `TariffServiceCode` (DD/DP).
+- Entidades: `EX`, `ST`, `N1`, `BT`, `CN` — con Name, TAXID, Address, Email principal.
+- `Items[].LadingDescription` — nombre del producto.
+- `Items[].CommodityCode` (GMID).
+- `Items[].ContainerDetails.NumberOfContainers` y `EquipmentType`.
+- `Items[].QuantityAndWeight.*` (peso, volumen, cantidad).
+- `DateTimeReference` (RSD y 002).
+- `Items[].BusinessInstructionsAndReferenceNumber.PGIDATE` — fecha despacho planificada.
+- `Items[].BusinessInstructionsAndReferenceNumber.DELIVERY` — número de delivery SAP.
+- `BusinessInstructionsReferenceNumberNotes` — instrucciones al forwarder (texto crítico).
+
+**Categoría B — Trazabilidad (se guardan, se consultan a demanda)**
+
+- `RoutingNumber` — constante, metadata.
+- Qualifiers `PE`, `SF` (Plant, Ship From).
+- `CO` (contract number) cuando existe.
+- `PlaceOfReceiptCode`, `PlaceOfDelivery`.
+- `RouteInformation.FreeFormDescription`, `RouteDescription`.
+- `ExchangeRate`, `ExchangeRateCurrencyCode`.
+- `PricingInformation*` (precios).
+- Entidades secundarias: `DIR`, `NP`, `AO`, `PK`, `PK2`, `PK3`.
+- `PAYMTRMS` (redundante con `TermsOfSaleDescription`).
+- `TermsOfSale`, `TermsOfSaleDescription`.
+
+**Categoría C — Probablemente ignorable (metadata técnica o sin variación)**
+
+- `TransactionSetPurposeCode` (constante 49).
+- `ApplicationType` (constante BN).
+- `ShipmentMethodPayment` (constante PP).
+- `CurrencyCode` (constante USD).
+- `q` (endpoint destino, metadata).
+- `EquipmentNumber`, `SealNumber` (siempre placeholders).
+- `LJ` (siempre N).
+- `Hazardous` (siempre vacío en los 11; revisar cuando aparezcan peligrosos).
+- Qualifiers `19`, `11`, `1V`, `AEG`.
+- `OCEAN CSGN` (duplica datos de Entities).
+- `LocationIdentifier` de entidades (sin normalizar, no aporta vs la dirección completa).
+
+### 7.12 Puntos a confirmar con Brian/Santiago (o pendientes de Jona)
+
+Para cerrar el schema definitivamente, resta validar:
+
+1. ~~**Diferencia PO `0118...` vs `4010...`**~~ — **Cerrado (22/04)**. Trade (`0118...`) vs STO intercompany (`4010...`). Ver `business-context.md` 4.3.
+2. **Códigos `D116`, `D146`, `D147`, `D176`** — mapa completo de shipping points / plantas Dow.
+3. **Códigos `P703`, `P706`, `P749`** — mapa completo de transportation planning points.
+4. **Significado exacto de `AEG`** y por qué aparece solo en algunas órdenes. **Parcial (22/04)**: confirmado que aparece solo en trade (`0118...`) porque es metadata regulatoria US-AES que no aplica a intercompañía. Falta confirmar si los valores posibles son más allá de `"DIRECT CONSUMER"`.
+5. **Significado de `LJ=N`** — confirmar que es flag Y/N y qué flag exactamente.
+6. **Estructura del array `Hazardous`** cuando una orden contiene productos peligrosos.
+7. **Qualifier `RSD` en `DateTimeReference`** — confirmar que es Requested Ship Date.
+8. **`SCAC "SSB"`** — confirmar si está registrado NMFTA o es código bilateral con Dow.
+9. **`EquipmentType 40CZ` y `VAEM`** — validar mapping a tipos de contenedor/equipo estandarizados.
+10. **Normalización de `LocationIdentifier`** (B, C, BA, SC, SP, PR, RM, LIM, V, MG, MEX) a códigos de estado/provincia o UN/LOCODE.
+
+Estas preguntas se agregan a `preguntas.md`.
+
+---

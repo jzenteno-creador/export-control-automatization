@@ -33,3 +33,6 @@ supabase/.branches/
 
 # Datos reales de Dow — NO SUBIR A GITHUB
 samples/
+
+# Handoffs de sesión (efímeros, no al repo)
+SESSION_HANDOFF.md
