@@ -3,8 +3,10 @@
 **Proyecto**: SSB-IT-RESEARCH
 **Propósito**: documento de contexto operativo y glosario del negocio. Fuente única para que cualquier decisión técnica (schema, arquitectura, prompts, workflows) esté anclada en la operativa real de SSB.
 **Autor**: Jona Zenteno (contenido), consolidación con Claude.
-**Versión**: 2 — 22/04/2026 (cierre tarde)
+**Versión**: 3 — 24/04/2026
 **Mantenimiento**: se actualiza cuando aparece un concepto nuevo del dominio o cambia la operativa. No se edita sin consulta a Jona.
+
+**Cambios v2 → v3 (24/04)**: agregado al glosario DCSA, DCSA Bill of Lading 3.0, DCSA Booking 2.0, Shipping Instruction (SI), Draft BL / Verify Copy, Customer Code, eaSI, Log-Aí. Aclarado INTTRA como plan B (no plan A). Nota sobre pendiente Log-In.
 
 ---
 
@@ -36,7 +38,7 @@ Este archivo cubre **solo** lo que aplica al SSB Export Dashboard (el dashboard 
 - **Rol**: despachante externo. Uno solo para toda la operación PBB Polisur.
 - **Relación**: tiene contrato directo con PBB Polisur, no con SSB.
 - **Función**: tramita los permisos de exportación a partir de la instrucción de exportación que le envía SSB.
-- **Integración futura**: hay una API en desarrollo (por programadores externos) entre Metric e Interlog para reemplazar el envío actual por mail + PDF.
+- **Integración futura**: API en testeo final (a confirmar fecha de producción). Hasta entonces, plan B: mail con instrucción de exportación.
 
 ---
 
@@ -68,7 +70,7 @@ Brasil es el 70%+ del volumen. Después Chile, Perú, Tierra del Fuego. Volumen 
 
 ### 4.3 Tipos de orden SAP
 
-Dow emite dos tipos de orden con prefijos distintos en el PO, visibles en los 304. **Confirmado operativamente por Jona (22/04)** y **validado empíricamente con los 11 JSONs cargados el 22/04 tarde**:
+Dow emite dos tipos de orden con prefijos distintos en el PO, visibles en los 304. **Confirmado operativamente por Jona (22/04)**:
 
 | Prefijo PO | Tipo | Características en el 304 |
 |---|---|---|
@@ -77,18 +79,15 @@ Dow emite dos tipos de orden con prefijos distintos en el PO, visibles en los 30
 
 El prefijo es estable: todas las trade arrancan con `0118`, todas las STO con `4010`.
 
-**Validación empírica (11 JSONs)**: 6 Trade + 5 STO = 11. Sin excepciones. Sin órdenes con prefijos distintos.
-
 **Diferencia operativa clave para el dashboard**:
 
 | Aspecto | STO (`4010...`) | Trade (`0118...`) |
 |---|---|---|
-| Destinatario de la documentación | **Siempre el mismo forwarder** del lado del destino (típicamente Brasil). Predecible con tabla maestra. | Variable orden a orden. Se extrae del campo `BusinessInstructionsReferenceNumberNotes` del 304. |
+| Destinatario de la documentación | **Siempre el mismo forwarder** del lado del destino (típicamente Brasil). Predecible con tabla maestra. | Variable orden a orden. Se extrae del TXT 107 del 304. |
 | Destinos | Recurrentes y acotados (Santos, Navegantes, Rio de Janeiro, Paranaguá, Itajaí, etc.). | Dispersos: ~30-40 clientes distintos con baja rotación. |
 | Estandarización del flujo | Alta. | Media — requiere leer instrucciones específicas del exportador en cada orden. |
 | Regulación US (AES) | No aplica (es intercompañía). | Aplica. `AEG` lleva el tipo de consignee final. |
-| Candidato a automatización fase 3 | **Alto** — mailing resoluble con tabla maestra cliente → forwarder. | **Medio** — requiere parseo IA del campo de instrucciones. |
-| Tamaño del campo `BusinessInstructionsReferenceNumberNotes` (empírico) | Plantillas repetidas idénticas: Comissaria Pibernat 3 órdenes con 3027 chars iguales, Caravan 2 órdenes con 1926 chars iguales. Sugiere parseabilidad alta. | Más variable: rango de 44 a 2065 chars en la muestra. |
+| Candidato a automatización | **Tabla maestra**: cliente STO → forwarder destino. Q29 abierta. | **Parseo IA del TXT 107** (G6 del MVP). |
 
 #### Clientes STO (intercompany Dow → Dow)
 - Dow Brasil Ind e Com (Navegantes, Itajaí, Santos, Manaus, Paranaguá, Rio de Janeiro, Extrema)
@@ -99,7 +98,7 @@ El prefijo es estable: todas las trade arrancan con `0118`, todas las STO con `4
 
 #### Clientes Trade (a terceros)
 - ~30-40 clientes recurrentes, baja rotación.
-- Requieren instrucciones específicas del exportador sobre qué mails enviar y a quién. Las instrucciones llegan dentro del campo `BusinessInstructionsReferenceNumberNotes` del 304.
+- Requieren instrucciones específicas del exportador sobre qué mails enviar y a quién. Las instrucciones llegan dentro del TXT 107 del 304.
 
 ### 4.4 Modos de transporte (MOT)
 
@@ -107,8 +106,7 @@ Codificado en el 304 como `RouteInformation[].TransportationMethodTypeCode`:
 
 - **`O` (Ocean)**: marítimo containerizado. El grueso del volumen. Puertos argentinos de salida: Bahía Blanca (PTN, directo desde planta) y Buenos Aires (TRP, EXOLGAN — la mercadería llega en tren desde Bahía Blanca vía Abbott en algunos casos).
 - **`M` (Motor)**: terrestre. Sale directo de plantas (aduanas domiciliarias). Paso principal: Paso de los Libres hacia Brasil. Secundario: Iguazú. Transportistas habituales: Don Pedro, Petrolera Alvear, Expreso El Aguilucho, Moggia, Siltrans, Loddin, Celsur.
-
-**Validación empírica (11 JSONs)**: 8 marítimos + 3 terrestres.
+- **`A` (Aéreo)**: 2-3 operaciones al año. **Fuera del alcance del MVP** — Jona lo confirma el 24/04.
 
 ### 4.5 Tipo de exportación (IntermodalServiceCode)
 
@@ -122,10 +120,20 @@ Codificado en el 304 como `Items[].ContainerDetails.IntermodalServiceCode`:
 
 ### 4.6 Navieras
 
-- **Log-In**: 60-70% del volumen. Fuerte en Brasil.
-- **Maersk**: segundo volumen. Tiene portal web para carga de BL y VGM manual.
-- **Hapag-Lloyd**: tercer volumen. Fuerte en APAC y destinos lejanos.
+- **Log-In**: 60-70% del volumen. Fuerte en Brasil. **Plataforma digital**: Log-Aí (portal web con login/password). **No tiene developer portal ni API pública conocida**. Respuesta oficial a consulta formal pendiente (mail enviado 24/04). Ver Q34, `research-apis-carriers.md` sección 4.
+- **Maersk**: segundo volumen. **Tiene Developer Portal API productivo** (OAuth 2.0 + DCSA Bill of Lading 3.0). El mail del 24/04 confirmó que existe "algo desarrollado", pendiente respuesta del área técnica. Cuello de botella para usar las APIs: Customer Code vinculado a cuenta A136. Ver Q37, `research-apis-carriers.md` sección 2.
+- **Hapag-Lloyd**: tercer volumen (bajo). **Developer Portal con APIs de T&T y Schedules, pero submit de SI no publicado**. Vía oficial productiva: eaSI (PDF/web) o INTTRA bilateral. Dado el bajo volumen, SSB prioriza modo asistido; INTTRA queda como plan B. Ver `research-apis-carriers.md` sección 3.
 - **Otras**: CMA CGM y otras según licitación.
+
+#### 4.6.1 Estrategia de integración (24/04)
+
+Del research completo en `research-apis-carriers.md` surgen 5 decisiones de diseño que quedan **enumeradas y pendientes de tomar**. Una de ellas es la arquitectura de adapters por carrier: cada naviera se trata como caja negra que implementa `submitSI()` + `onDraftBLReady()`, con implementación interna distinta:
+
+- **Maersk** → API nativa (OAuth 2.0 + REST DCSA).
+- **Hapag-Lloyd** → modo asistido en R1 (dashboard muestra package pre-llenado, documental copy-paste). INTTRA como plan B futuro si sube volumen.
+- **Log-In** → depende de respuesta Log-In. Si ofrecen API/EDI/SFTP se integra; si no, modo asistido con eventual RPA sobre Log-Aí.
+
+VGM: ninguna naviera tiene API pública para VGM conocida al 24/04. Sigue como envío por Excel + mail (R3 del MVP). Ver Q31.
 
 ---
 
@@ -133,11 +141,12 @@ Codificado en el 304 como `Items[].ContainerDetails.IntermodalServiceCode`:
 
 ### 5.1 Metric — sistema core de SSB
 - Desarrollado por programadores externos. Repo: `git.ssbint.com/ssb_int_git/sosab-api.git`.
-- **Recibe el JSON del 304 desde SAP** (el mismo que entra al Importer, en paralelo — Q2 cerrada en research.md sección 4).
+- **Recibe el JSON del 304 desde SAP** (el mismo que entra al Importer, retransmitido o en paralelo — Q2 cerrada: en paralelo).
 - El coordinador carga manualmente: booking, cortes, buque, flete, aduana, transporte.
 - Genera el PDF de instrucción de exportación para Interlog.
 - Emite eventos 315 a SAP con fechas de tracking.
 - **Estados**: New Offer → Accepted → In Transit → Arrive (+ Cancelada).
+- **Bot interno**: los coordinadores disparan un bot de Metric que sube documentos desde Drive a Metric. Este bot **no se toca** (NG15 del dashboard). El dashboard lee los Drives en paralelo.
 
 ### 5.2 Importer ("Codego")
 - Laravel 8 + PHP. Repo: `git.ssbint.com/ssb_int_git/codego_importer_uat.git`.
@@ -188,6 +197,7 @@ Codificado en el 304 como `Items[].ContainerDetails.IntermodalServiceCode`:
 - **Origen**: Interlog lo tramita a partir de la IE.
 - **Formato del permiso**: ej. `25003EC03002997S`.
 - **Importancia**: sin permiso, la orden NO puede despacharse.
+- **Flujo de control en el dashboard**: el dashboard extrae el permiso de la planilla de aduana y lo cruza contra el **reporte de permisos descargado periódicamente de Interlog** (método actual del equipo). Detecta errores de tipeo en la planilla.
 
 ### 6.4 Excel de Planta (Informe de Despacho)
 - **Origen**: personal de planta lo envía por mail al despachar mercadería.
@@ -195,12 +205,17 @@ Codificado en el 304 como `Items[].ContainerDetails.IntermodalServiceCode`:
 
 ### 6.5 Planilla de Aduana
 - **Origen**: Interlog la envía por mail al despachar.
-- **Contenido**: DDT, PO, buque, destino, terminal, canal, contenedores, precintos, bultos, peso.
-- **Uso crítico**: la información se usa para declarar en el BL.
+- **Contenido**: DDT, PO, buque, destino, terminal, canal, contenedores, precintos, bultos, peso, **permiso de exportación**.
+- **Uso crítico**: la información se usa para declarar en el BL. Es el input principal de R1 del MVP.
+- **Errores recurrentes**: al ser un Excel manual, puede haber errores en permiso, contenedor, precinto. El dashboard cruza contra fuentes adicionales (304, factura, reporte Interlog) para detectarlos.
 
-### 6.6 Reporte de Balanza (VGM / BGM)
-- Pesadas de contenedores. Se arma tabla dinámica para extraer la última pesada por contenedor.
-- Se envía a terminal y naviera (mail o portal según naviera).
+### 6.6 Reporte de Balanza (VGM — Verified Gross Mass)
+- **Origen**: balanza de planta en Bahía Blanca. Una persona baja un reporte consolidado de todas las pesadas del período.
+- **Canal**: llega por mail al equipo SSB.
+- **Limitación operativa**: a veces no está disponible el viernes; se solicita el lunes.
+- **Proceso actual**: se hace una limpieza del reporte y se toma la última pesada por contenedor, con un control manual de que sea la correcta.
+- **Envío a navieras**: a **Log-In y Maersk** se envía un Excel con formato establecido (reserva, contenedor, pesada) por correo electrónico. No hay API disponible al 24/04.
+- **Nota de terminología**: internamente a veces se dice "BGM" o se escucha como "BGM" en transcripciones, pero el nombre correcto es **VGM** (Verified Gross Mass — peso bruto verificado, definición IMO SOLAS). BGM no es un estándar internacional; usamos **VGM** en toda la documentación técnica.
 
 ### 6.7 Factura de Exportación
 - Se emite al día siguiente del despacho.
@@ -208,9 +223,11 @@ Codificado en el 304 como `Items[].ContainerDetails.IntermodalServiceCode`:
 - Se cruza contra BL y planilla de aduana.
 
 ### 6.8 Bill of Lading (BL)
-- **BL Draft**: el documental carga la declaración en el portal de la naviera (Log-In, Maersk, Hapag-Lloyd) usando datos de la planilla de aduana. Después descarga el draft.
-- **Control del BL (crítico)**: cruce manual contra factura, planilla, otros documentos. Campos a verificar: consignatario, producto, peso, contenedor, permiso, precinto. Hoy 100% manual.
-- **BL Final**: una vez aprobado, se descarga del portal.
+
+- **Shipping Instruction (SI) / "Declaración de embarque"**: el input que SSB envía al carrier para que emita el BL. Internamente en SSB se llama "declaración de embarque". En la industria / especificaciones DCSA se llama **Shipping Instruction**. Son sinónimos. Hoy el documental la carga manualmente en el portal de la naviera usando datos de la planilla de aduana. R1 del MVP automatiza la generación del package y, donde hay API disponible (Maersk), el envío directo.
+- **BL Draft / Verify Copy**: el borrador del BL que emite el carrier después de recibir la SI. En Maersk el término oficial es *Verify Copy*; en Hapag *Draft BL*; en Log-In se llama *BL Draft*. Son equivalentes.
+- **Control del BL (crítico)**: cruce manual contra factura, planilla, otros documentos. Campos a verificar: consignatario, producto, peso, contenedor, permiso, precinto. Hoy 100% manual. **Automatizado en R1 del MVP**: determinístico + IA.
+- **BL Final**: una vez aprobado, se descarga del portal (Maersk discontinuó pedidos por mail desde sept-2025).
 - **Plazo**: cada naviera tiene límite horario distinto para correcciones.
 
 ### 6.9 CRT (Carta de Porte Internacional por Carretera)
@@ -221,11 +238,17 @@ Codificado en el 304 como `Items[].ContainerDetails.IntermodalServiceCode`:
 ### 6.10 Certificado de Origen (COO)
 - Se tramita en la Cámara Argentina de Comercio.
 - Aplica al ~95% de las exportaciones (producto argentino).
-- **Modalidades**: digital (la mayoría) y **físico** (con firma y sello reales). El COO físico es el único documento que viaja por courier/correo al cliente; el resto de la documentación es 100% electrónico. Ver sección 7bis.
+- **COO digital** (~95% casos): Cámara entrega un ZIP con XML (certificado digital válido) + PDF (informativo). El documental descarga, descomprime, arma el envío al cliente con XML re-comprimido + PDF. **Automatizado en R2 del MVP (G9)**.
+- **COO físico** (casos residuales, Q28 abierta): requiere firma física de la Cámara. Se envía por courier. El dashboard solo lo marca como físico y gestiona la parte escaneada del flujo documental.
 
 ### 6.11 Packing List
 - Variantes marítimo y terrestre.
 - n8n lo captura del mail y lo guarda en Drive.
+
+### 6.12 Certificado de Seguro
+- Aplica solo a órdenes **CIF** (Cost Insurance Freight — Incoterm donde el exportador paga seguro hasta destino).
+- Lo emite la compañía aseguradora y se recibe por correo.
+- El operador lo guarda en Drive; el dashboard lo adjunta al mail cuando la orden lo requiere. **Parte de R2 del MVP (G11)**.
 
 ---
 
@@ -241,88 +264,49 @@ Codificado en el 304 como `Items[].ContainerDetails.IntermodalServiceCode`:
 ### Fase 2 — Coordinación e instrucción
 6. Coordinador carga en Metric: booking, cortes, buque, flete, aduana, transporte.
 7. Metric genera PDF de Instrucción de Exportación.
-8. Coordinador lo envía a Interlog por mail.
+8. Coordinador lo envía a Interlog por mail (o por API cuando esté productiva).
 9. Interlog tramita el permiso de exportación.
 10. Interlog envía los permisos por mail al final del día.
 
 ### Fase 3 — Despacho
 11. Con permiso OK, planta consolida contenedor, precinta y despacha (aduana domiciliaria).
-12. Planta envía Excel de despacho + reporte de balanza por mail.
+12. Planta envía Excel de despacho + reporte de balanza (VGM) por mail.
 13. Interlog envía planilla de aduana por mail.
 14. n8n captura planilla y factura.
 15. Estado en Metric: **Accepted → In Transit**.
 
 ### Fase 4 — Post-despacho documental
 16. Factura de exportación (día siguiente). n8n la captura.
-17. VGM: tabla dinámica de última pesada por contenedor → envío a terminal y naviera.
-18. Declaración de embarque: documental carga en portal de naviera usando planilla.
-19. Descarga BL Draft → control manual contra factura/planilla/otros → correcciones en portal → BL Final.
-20. Certificado de origen: se tramita en Cámara Argentina de Comercio → PDF al Drive.
+17. VGM: limpieza del reporte + selección de última pesada por contenedor → envío a terminal y naviera por Excel + mail.
+18. Shipping Instruction / Declaración de embarque: documental la carga en portal de naviera usando planilla de aduana + factura + VGM. **R1 automatiza este paso** (modo asistido para carriers sin API, end-to-end para Maersk).
+19. Descarga BL Draft / Verify Copy → control manual contra factura/planilla/otros → correcciones en portal → BL Final. **R1 automatiza el control del BL** (determinístico + IA).
+20. Certificado de origen: se tramita en Cámara Argentina de Comercio → ZIP con XML + PDF → descompresión → Drive.
 
 ### Fase 5 — Envío al cliente y tracking
-21. Documental arma el mail con BL + factura + packing list + COO + CRT según aplique.
-22. Envío manual al cliente según instrucciones (ver sección 7bis).
+21. Documental arma el mail con BL + factura + packing list + COO + CRT + certificado de seguro CIF según aplique.
+22. Envío manual al cliente según instrucciones del TXT 107 del 304.
 23. Metric emite eventos 315 a SAP: Sailing Date, Confirmed on Board, Customs Cleared, BL Received, Vessel Arrival, etc.
 
----
+### 7bis Estado operativo consolidado para el dashboard (23/04)
 
-## 7bis. Reglas operativas del mailing al cliente
+A partir del cierre de Goals/Non-goals del MVP (23/04), el dashboard representa los 5 fases as-is con **4 estados primarios** más checkpoints paralelos. Esto refleja mejor cómo piensa el operador:
 
-Sección crítica. El mailing al cliente es uno de los puntos de dolor principales (P3 en sección 10) y su automatización es el objetivo de mayor valor del dashboard post-MVP.
-
-### 7bis.1 Modalidad de envío
-
-| Modalidad | Cuándo aplica | Materialización |
+| Estado dashboard | Equivalente Metric / fase as-is | Comentario |
 |---|---|---|
-| **Electrónico** | Default — ~95%+ de las órdenes | Mail con documentación adjunta (BL, factura, packing list, COO digital, CRT cuando aplique). |
-| **Físico** | Solo órdenes con **COO físico** requerido | Además del envío electrónico, courier/correo postal con el COO con firma y sello reales de la Cámara Argentina de Comercio. Algunos países/clientes lo exigen por regulación aduanera local. |
+| **New Offer** | Metric "New Offer" / fase 1 | 304 recibido. |
+| **Aceptado y Documentado** | Metric "Accepted" / fases 2-4 | Consolidación: instrucción enviada, planilla cargada, BL aprobado, mails enviados. Checkpoints paralelos dentro de este estado. |
+| **En Tránsito** | Metric "In Transit" / inicio de fase 5 | Disparado por 315 de zarpe. Alertas de "próximo arribo" N días antes. |
+| **Arribado** | Metric "Arrive" / fin de fase 5 | Disparado por 315 de arribo. |
 
-**Implicancia para el dashboard**: necesita un flag `requiere_envio_fisico` derivado por orden. La regla precisa de cuándo aplica el físico queda como pregunta abierta para el equipo documental (ver Q28 en `preguntas.md`).
-
-### 7bis.2 Origen del destinatario
-
-La lista de destinatarios de cada orden se compone de **dos fuentes complementarias del 304**:
-
-| Fuente | Qué aporta | Fiabilidad |
-|---|---|---|
-| **Campo `BusinessInstructionsReferenceNumberNotes`** (texto libre del exportador) | Indica **qué documentación** mandar y **a quién**, con instrucciones específicas por orden. Parte estructurada con marcadores `#12A#`, `#13A#`, `#15B#` y parte texto libre. Ver sección 8. | Alta para Trade (instrucciones explícitas). Requiere parseo con IA en fase 2-3. |
-| **Entidad `N1` (Notify Party)** | Mail de contacto del notify. **Presente en los 11 JSONs analizados (100%)**. | Alta como fallback universal. Validado empíricamente. |
-
-**Regla práctica a implementar**:
-
-1. Parsear el campo de instrucciones con IA → obtener lista principal de destinatarios y reglas específicas.
-2. Si el parseo falla o no hay destinatarios claros → usar el mail de la entidad `N1` del 304 como fallback.
-3. Aplicar overrides del cliente (ver 7bis.4).
-4. Cuando Brian/SSB inicie el flujo, loguear qué fuente se usó (IA / N1 / override) para trazabilidad.
-
-### 7bis.3 Diferencia operativa STO vs Trade
-
-Implicancia directa para automatización:
-
-- **STO (prefijo `4010...`)**: el destinatario es casi siempre un **despachante/forwarder intermediario conocido** del lado destino (Comissaria Pibernat en Brasil, BDP International en Chile, etc.). El mailing es **automatizable sin IA** con una tabla maestra `cliente_sto → despachante_destino`. Ver Q29 en `preguntas.md` (pendiente confirmar si esa tabla existe hoy en SSB).
-- **Trade (prefijo `0118...`)**: el destinatario suele ser el **cliente directo** o un intermediario variable. Requiere parseo del campo de instrucciones (IA) o uso del fallback N1.
-
-### 7bis.4 Overrides por cliente — requerimiento del dashboard
-
-**Capacidad que el dashboard debe tener en la web** (no resuelve por sí solo el 304 — es decisión manual del equipo documental):
-
-1. **Agregar destinatarios** a la lista derivada del 304 a nivel cliente. Caso típico: un cliente pide incluir backup, persona nueva del equipo, gerente en copia.
-2. **Excluir destinatarios** de la lista derivada del 304 a nivel cliente o a nivel orden puntual. Caso típico: mail de persona que dejó la empresa, mail equivocado, contacto que pidió baja.
-
-**Principios**:
-
-- **Persistencia por cliente**: los overrides se configuran una vez, no en cada orden.
-- **Excepciones a nivel orden**: posibilidad de override puntual solo para una orden específica (sin afectar la regla del cliente).
-- **Audit trail obligatorio**: quién agregó/quitó, cuándo, por qué pedido. Sin trazabilidad no se puede responder "¿por qué sigue llegando a X?" o "¿quién sacó a Y?".
-- **Reversible**: baja un override no implica borrar historial.
-
-**Cuándo se implementa**: fuera del MVP. Módulo de mailing completo = fase 2/3 del proyecto.
+Los checkpoints paralelos del estado 2 (`planilla_cargada`, `permiso_controlado`, `declaracion_lista`, `bl_aprobado`, `mail_{doc}_enviado`) son visibles en el dashboard sin ser "estados" en sentido estricto. El estado 3 avanza **independientemente** de que falten mails — el dashboard sigue alertando al operador hasta que se complete el envío de todos los documentos.
 
 ---
 
-## 8. El campo más crítico del 304 — `BusinessInstructionsReferenceNumberNotes`
+## 8. El campo más crítico del 304 — `BusinessInstructionsReferenceNumberNotes` (alias TXT 107)
 
 Merece sección propia por su valor operativo.
+
+**Alias SSB**: `TXT 107`. Es cómo el operador ve este campo en SAP y cómo se lo nombra internamente. De acá en adelante, los documentos técnicos del proyecto y el código pueden usar ambos términos indistintamente.
 
 **Qué es**: campo string dentro del JSON del 304 con **instrucciones del exportador (Dow) al forwarder (SSB)**. Texto libre, entre 44 y 3027 caracteres según la orden.
 
@@ -342,20 +326,9 @@ Merece sección propia por su valor operativo.
 - Es vinculante: si no se cumple, puede haber errores costosos.
 - En caso de conflicto o error, se revisa con el exportador.
 
-**Dónde vive en el dashboard (futuro)**: candidato #1 para asistencia con IA en fase 2/3. Permitiría auto-armar el mailing, flagear requisitos especiales antes del BL, detectar casos especiales.
+**Dónde vive en el dashboard (MVP)**: candidato #1 para IA. **G6 del MVP** (v5, 23/04): parseo IA del TXT 107 que alimenta G5 (Panel Declaración Lista), G7 (Control BL en texto libre) y G8 (Template del mail al cliente).
 
-**En el schema**: se persiste el texto completo crudo, sin transformar, hasta que exista un modelo de parseo validado.
-
-**Validación empírica del tamaño (11 JSONs del 22/04)**:
-
-| Rango de caracteres | Cantidad de JSONs | Observación |
-|---|---|---|
-| < 100 | 2 | Rio Chico (78), BDP South America (44) |
-| 500 - 1000 | 3 | Tecnología de Materiales (553), Cryovac (837), BDP Chile (873) |
-| 1500 - 2100 | 3 | Caravan do Brasil (1926) x2, Chiacchio (2065) |
-| 3000+ | 3 | Comissaria Pibernat (3027) x3 |
-
-Las 3 órdenes de Pibernat (3027 idéntico) y las 2 de Caravan (1926 idéntico) sugieren **plantillas repetidas** — buena noticia para el parseo IA, patrón estable.
+**En el schema**: se persiste el texto completo crudo, sin transformar, junto con la versión parseada. El texto crudo nunca se sobreescribe.
 
 ---
 
@@ -378,19 +351,7 @@ Referencia rápida de números que aparecen en la operativa. Esta sección es el
 | **Invoice** | Número de factura de exportación | Formato con guion | `0110-00054905` |
 | **COO** | Número certificado de origen | `AR004...` | `AR004A18250003162300` |
 
-**Nota importante sobre leading zeros del PO**:
-
-SAP persiste los PO como **CHAR(10) con ceros a izquierda** (alineación a derecha con relleno). Es convención interna SAP, no dato operativo.
-
-- En el JSON del 304 llega siempre con 10 dígitos: `0118705352`.
-- El equipo operativo lo busca, escribe y menciona **sin el cero inicial**: `118705352`.
-- En STO el primer dígito es `4`, así que no hay ceros a quitar: `4010470219` queda igual.
-
-**Regla para el dashboard**:
-- **Persistir crudo** tal cual llega (10 chars, cumple criterio no-negociable #5 de `plan.md` sobre preservar el input).
-- **Mostrar al usuario** sin el cero a la izquierda.
-- La conversión es trivial: `TRIM(LEADING '0' FROM po)` en SQL o `parseInt` en JavaScript.
-- Este tratamiento es un ejemplo concreto de **Anti-Corruption Layer (ACL)**: la convención de SAP no debe contaminar la UI ni el resto del modelo interno.
+**Nota sobre leading zeros del PO**: SAP persiste CHAR(10) con ceros adelante. El equipo SSB opera sin el cero (`0118705352` → `118705352`). El dashboard **persiste crudo** (con ceros) y **muestra normalizado** (sin ceros) — ACL (Anti-Corruption Layer) en la UI.
 
 ### 9.2 Identificadores de producto
 
@@ -405,25 +366,17 @@ SAP persiste los PO como **CHAR(10) con ceros a izquierda** (alineación a derec
 | Concepto | Dónde aparece | Ejemplo |
 |---|---|---|
 | **MOT** (Mode of Transport) | `RouteInformation[].TransportationMethodTypeCode` | `O` (Ocean), `M` (Motor) |
-| **Incoterm** | `TransportationTermsCode` | `CPT`, `CFR`, `FCA` |
+| **Incoterm** | `TransportationTermsCode` | `CPT`, `CFR`, `FCA`, `CIF` |
 | **Service Type** | `TariffServiceCode` | `DD` (Door-to-Door), `DP` (Door-to-Port) |
 | **Shipping Point / SH Point** | Qualifier `SF` en refs generales | `D146`, `D116`, `D147`, `D176` |
 | **Transportation Planning Point** | Qualifier `PE` en refs generales | `P703`, `P706`, `P749` |
-| **DeliveryLocation (lugar Incoterm)** | `DeliveryLocation` (texto libre) | `"SALVADOR PORT"`, `"NAVEGANTES PORT"`, `"BAHIA BLANCA"`, `"MAIPU"` — **ver nota crítica abajo** |
-| **Destino físico final** | Entidad `ST` (Ship To) → `CityName` + `CountryCode` | `EXTREMA / BR`, `LONDRINA / BR`, `RIO GRANDE / AR` |
+| **DeliveryLocation** | Campo `DeliveryLocation` (texto libre) | `"SALVADOR PORT"`, `"NAVEGANTES PORT"`, `"MAIPU"` |
 | **Container Type** | `Items[].ContainerDetails.EquipmentType` | `40CZ` (marítimo 40'), `VAEM` (terrestre/van) |
 | **Fecha planificada de despacho** | Sub-qualifier `PGIDATE` en items | YYYYMMDD, ej `20260425` |
 | **Fecha solicitada de despacho** | Qualifier `RSD` en `DateTimeReference` | YYYYMMDD |
 | **Fecha entrega requerida** | Qualifier `002` en `DateTimeReference` | YYYYMMDD |
 
-**Nota crítica sobre destino** (corrección importante del 22/04):
-
-`DeliveryLocation` **no es el destino físico final de la mercadería**. Es el lugar asociado al Incoterm declarado:
-
-- En Incoterms **CPT / CFR** (Carriage Paid To / Cost and Freight): `DeliveryLocation` es el **puerto de descarga**. Ej: Santos Port, Navegantes Port. Pero la mercadería continúa después por camión interior hasta el cliente (ej: Santos Port → Extrema, 400 km tierra adentro).
-- En Incoterms **FCA / FOB** (Free Carrier / Free On Board): `DeliveryLocation` es el **punto de entrega en origen**. Ej: Bahía Blanca, Abbott Whse. La mercadería va físicamente a otro destino (ej: Abbott Whse → Rio Grande, Tierra del Fuego).
-
-Para obtener el **destino físico final** (lo que el documental necesita para el mailing) hay que mirar la entidad `ST` (Ship To) del JSON, no `DeliveryLocation`. Implicancia para el schema: el dashboard necesita **dos campos distintos**, destino logístico Incoterm + destino físico final. Si mostrara solo uno, rompe la operativa.
+**IMPORTANTE**: `DeliveryLocation` **no es** destino físico final. Es el lugar asociado al Incoterm. En FCA es punto de origen (Abbott/Bahía Blanca). En CPT/CFR es puerto de descarga, no ciudad de entrega final. El destino físico final se deriva de la entidad `ST` (Ship To). El schema normalizado necesita **dos campos distintos**.
 
 ### 9.4 Actores del embarque (Entities del 304)
 
@@ -445,19 +398,19 @@ Para obtener el **destino físico final** (lo que el documental necesita para el
 ## 10. Puntos de dolor y oportunidades (priorizados)
 
 ### P1 (crítico) — Acceso a información para declaración del BL
-Los documentales cruzan 3 fuentes (planilla de aduana, factura, booking) para cargar la declaración en portales de navieras. Hoy es manual. El Validador Aduanal ya resuelve parte (parseo de planillas); integrarlo al dashboard cierra el círculo.
+Los documentales cruzan 3 fuentes (planilla de aduana, factura, booking) para cargar la declaración en portales de navieras. Hoy es manual. El Validador Aduanal ya resuelve parte (parseo de planillas); **se copia al dashboard en R1 del MVP** (NG16) para cerrar el círculo.
 
 ### P2 (crítico) — Control del BL
-Cruce manual de BL draft contra factura, planilla y otros documentos. Errores recurrentes: tipeo, producto desactualizado, permiso mal escrito, peso incorrecto. **Oportunidad**: automatizar cruce con IA (fase 2-3 del dashboard).
+Cruce manual de BL draft contra factura, planilla y otros documentos. Errores recurrentes: tipeo, producto desactualizado, permiso mal escrito, peso incorrecto. **Atacado en R1 del MVP (G7)**: determinístico + IA.
 
 ### P3 (crítico) — Mailing de documentación
-100% manual. Documental busca docs en Drive, arma mail, adjunta, envía. Puede haber 2-3 envíos por orden. Sin seguimiento, sin alertas de arribo al cliente. **Oportunidad**: pre-armar mail con estructura fija + adjuntos correctos + destinatarios derivados del 304 (`BusinessInstructions...` + `N1`) + overrides configurables por cliente. Ver sección 7bis.
+100% manual. Documental busca docs en Drive, arma mail, adjunta, envía. Puede haber 2-3 envíos por orden. Sin seguimiento, sin alertas de arribo al cliente. **Atacado en R2 del MVP (G8, G14)**: pre-armado + seguimiento por doc/cliente.
 
 ### P4 — Duplicación Metric / Excel
-Toda coordinación se carga dos veces: Metric (cara al cliente SAP) + Excel (herramienta interna). Reducir la duplicación es objetivo largo plazo.
+Toda coordinación se carga dos veces: Metric (cara al cliente SAP) + Excel (herramienta interna). Reducir la duplicación es objetivo largo plazo, fuera del MVP.
 
 ### P5 — Deadlines y alertas
-Cortes documentales, VGM, plazos de corrección de BL por naviera — hoy monitoreados por una persona mirando el programa marítimo. **Oportunidad**: alertas proactivas en el dashboard.
+Cortes documentales, VGM, plazos de corrección de BL por naviera — hoy monitoreados por una persona mirando el programa marítimo. **Atacado en R4 del MVP (G12)**: alertas proactivas.
 
 ### P6 — CRT escaneados
 OCR pendiente en n8n para completar archivado automático de CRT (los digitales ya funcionan).
@@ -478,15 +431,22 @@ OCR pendiente en n8n para completar archivado automático de CRT (los digitales 
 ### En desarrollo
 | Integración | Tipo | Estado |
 |---|---|---|
-| Metric → Interlog | API JSON (instrucciones) | En desarrollo (programadores externos) |
+| Metric → Interlog | API JSON (instrucciones) | En testeo final |
 
 ### Del dashboard nuevo (SSB-IT-RESEARCH)
-| Integración | Tipo | Fase |
+| Integración | Tipo | Release |
 |---|---|---|
-| Dashboard ← 304 (Importer, webhook) | Webhook HTTP POST desde Importer Laravel al endpoint Supabase | Endpoint desplegado 22/04, esperando que Brian implemente outbound call |
-| Dashboard → Supabase | Persistencia | Walking Skeleton desplegado (tabla `inbound_events` con 11 filas reales al 22/04 tarde) |
+| Dashboard ← Importer (webhook 304) | Push HTTP | ✅ Walking Skeleton desplegado. Confirmación Brian pendiente (Q25). |
+| Dashboard ↔ Supabase | Persistencia | En uso (WS). Schema completo pendiente. |
 | Dashboard ↔ n8n | Orquestación de workflows | Pendiente |
-| Dashboard ↔ Claude API | Control BL + parseo instrucciones | Fase 2-3 |
+| Dashboard ↔ Claude API | Parseo TXT 107, control BL, template mail | R1-R2 |
+| Dashboard ← Metric (301 push) | Push HTTP | R4 (a solicitar a Santiago) |
+| Dashboard ← Metric (315 push) | Push HTTP | R4 (a solicitar a Santiago) |
+| Dashboard ↔ API Interlog | API JSON | R1 Vía A (en testeo) |
+| Dashboard ↔ Drive | Lectura por naming convention | R1-R2 |
+| Dashboard → Maersk (SI submit + BL draft retrieve) | REST DCSA OAuth2 | R1. Pendiente Customer Code (Q37). |
+| Dashboard → Hapag-Lloyd (modo asistido) | UI + copy-paste | R1. INTTRA como plan B futuro. |
+| Dashboard → Log-In | Depende respuesta Log-In (Q34) | R1. Modo asistido inicial. |
 
 ---
 
@@ -496,11 +456,12 @@ OCR pendiente en n8n para completar archivado automático de CRT (los digitales 
 | Término | Significado |
 |---|---|
 | **ATA** | Agente de Transporte Aduanero (terrestre) |
-| **BGM** | Bill of Lading marítimo — se usa como sinónimo interno de peso verificado (balanza). Ver VGM. |
 | **BL** | Bill of Lading, conocimiento de embarque marítimo |
-| **BL Draft / BL Final** | Borrador del BL para revisión / versión final aprobada |
+| **BL Draft / Verify Copy** | Borrador del BL que emite el carrier después de recibir la Shipping Instruction, antes de confirmar el BL Final. En Maersk se llama *Verify Copy*; en Hapag *Draft BL*; en Log-In *BL Draft*. Son equivalentes. Se revisa, se corrige si hace falta, se aprueba. |
+| **BL Final / Original** | Versión final aprobada del BL. Se descarga del portal de la naviera o llega por mail / e-BL según carrier. |
 | **Booking** | Reserva de espacio en buque |
 | **Booking Advice** | Documento con info de la orden al momento del ofrecimiento |
+| **CIF** | Cost Insurance Freight — Incoterm donde el exportador paga seguro hasta destino |
 | **COO / COD** | Certificate of Origin / Certificado de Origen |
 | **CRT** | Carta de Porte Internacional por Carretera (equivalente terrestre del BL) |
 | **Cut Off** | Fecha límite de ingreso de contenedores a terminal |
@@ -516,7 +477,7 @@ OCR pendiente en n8n para completar archivado automático de CRT (los digitales 
 | **ISPM 15** | Norma internacional de tratamiento fitosanitario para embalajes de madera |
 | **IE** | Instrucción de Exportación |
 | **MOT** | Mode of Transport |
-| **MPC** | Siglas internas SSB — marítimo ? (a clarificar si surge ambigüedad) |
+| **MPC** | Siglas internas SSB — marítimo (a clarificar si surge ambigüedad) |
 | **NCM / PA** | Nomenclatura Común del Mercosur / Posición Arancelaria |
 | **NW** | Fecha de New (ofrecimiento) |
 | **PE** | Permiso de Exportación |
@@ -525,10 +486,11 @@ OCR pendiente en n8n para completar archivado automático de CRT (los digitales 
 | **POL** | Port of Loading (puerto de origen) |
 | **PTN** | Puerto Nuevo (Bahía Blanca) |
 | **SHP** | Shipment Number |
+| **Shipping Instruction / SI** | Instrucción que el shipper (SSB en nombre de PBB) envía al carrier (Log-In / Maersk / Hapag) para que emita el BL. Internamente SSB la llama **"declaración de embarque"**. Son sinónimos. Contiene shipper, consignee, notify, incoterm, cargo, HS codes, instrucciones especiales. |
 | **SITA** | Solicitud de anulación de permiso |
 | **STO** | Stock Transfer Order (intercompany Dow) |
 | **TRP** | Terminal Río de la Plata (Buenos Aires) |
-| **VGM** | Verified Gross Mass — peso verificado del contenedor (internamente lo llaman BGM) |
+| **VGM** | **Verified Gross Mass** — peso bruto verificado del contenedor (IMO SOLAS). Internamente a veces se dice "BGM" — el término correcto es **VGM con V chica**. |
 | **315** | Evento de tracking en SAP |
 
 ### Términos técnicos del 304 / EDI
@@ -537,13 +499,31 @@ OCR pendiente en n8n para completar archivado automático de CRT (los digitales 
 | **304** | Transaction Set de EDI X12 — "Shipping Instructions". El JSON que Dow manda a SSB |
 | **301** | Transaction Set X12 — "Confirmation". Lo emite Metric hacia SAP |
 | **EDI X12** | Electronic Data Interchange formato ANSI X12. Estándar US de mensajería B2B |
+| **EDIFACT** | Estándar europeo/ONU de EDI. Equivalente global a X12. Relevante acá: el formato **IFTMIN** (Shipping Instructions) que Maersk acepta vía EDI directo o INTTRA. |
 | **EntityIdentifier** | Código de rol de un actor del embarque (EX, ST, N1, etc.) |
 | **GMID** | Global Material Identifier de Dow. Código interno de producto. NO es NCM |
 | **IDOC SHPMNT** | Tipo de documento SAP (SHPMNT03/05/06). Se serializa a X12 o JSON antes de enviar |
 | **Qualifier** | En EDI, muchos elementos son pares *qualifier + value*. El qualifier define qué tipo de dato es el value |
 | **ReferenceIdentificationQualifier** | Código que identifica qué tipo de referencia sigue (PO, CO, SF, etc.) |
 | **SCAC** | Standard Carrier Alpha Code. Asignado por NMFTA (USA). En los 304 aparece `SSB` — pendiente confirmar si es oficial o bilateral |
+| **TXT 107** | Alias SSB de `BusinessInstructionsReferenceNumberNotes`. Cómo lo ve el operador en SAP. |
 | **UN/LOCODE** | Código UN de 5 caracteres para puertos (ej. `BRSSZ` = Santos) |
+
+### Términos técnicos de APIs / carriers (nuevos — 24/04)
+| Término | Significado |
+|---|---|
+| **DCSA** | *Digital Container Shipping Association*. Asociación fundada en 2019 por los 10 carriers deep-sea globales más grandes (Maersk, MSC, CMA CGM, Hapag-Lloyd, ONE, Evergreen, Yang Ming, HMM, ZIM, PIL). Publica specs públicas de API para container shipping. Adoptar DCSA como modelo de datos interno desacopla el dashboard de la heterogeneidad de carriers. |
+| **DCSA Bill of Lading 3.0** | Estándar DCSA que define el contrato de datos de la Shipping Instruction, el Draft BL y el BL final. Finalizado feb-2025. Incluye módulos de *Shipping Instructions*, *Transport Document*, *eBL Issuance*, *eBL Surrender*. Maersk lo tiene productivo en su Developer Portal como API "Ocean – Carrier Bill of Lading [DCSA]". |
+| **DCSA Booking 2.0** | Estándar DCSA del contrato de datos de la reserva (booking). Finalizado feb-2025. Maersk lo expone como API "Ocean Booking v2 [DCSA]". |
+| **DCSA Track & Trace 2.2** | Estándar DCSA para eventos de shipment/equipment/transport. Hapag-Lloyd lo tiene en beta pública. Productos equivalentes en Maersk: Track and Trace Plus + Visibility Studio. |
+| **Customer Code** | Código que Maersk asigna a cada cliente corporativo. Las Customer APIs de Maersk (las que devuelven datos de órdenes reales) requieren que el consumer key del developer portal esté vinculado a al menos 1 Customer Code válido. **Para SSB, el Customer Code relevante es el de la cuenta A136 PBB/Dow** — se solicita a la oficina local Maersk AR. Bloqueante de R1 Maersk hasta que se tenga. |
+| **Consumer Key / Consumer Secret** | Credenciales OAuth 2.0 que generan las APIs de Maersk y Hapag-Lloyd en sus developer portals. El Consumer Key identifica la app; el Secret se usa para obtener tokens de acceso. |
+| **Shipping Instruction (SI)** | Nombre estándar industria / DCSA de la "declaración de embarque" de SSB. Ver entrada del glosario comex arriba. |
+| **eaSI** | *electronic advanced Shipping Instructions*. Herramienta de Hapag-Lloyd para envío de SI. Dos variantes: eaSI online (formulario web) y eaSI mail (PDF editable por mail). **No tiene variante API pública al 24/04**. |
+| **Log-Aí** | Plataforma web de Log-In Logística Intermodal ([logai.loginlogistica.com.br](https://logai.loginlogistica.com.br)). Cliente accede con login/password. Permite booking online, tracking, envío/descarga de documentación. **No tiene API pública conocida** al 24/04 — respuesta oficial pendiente (Q34). |
+| **INTTRA / e2open** | Hub/plataforma de integración B2B para container shipping. Co-fundada por Maersk, CMA CGM, Hapag-Lloyd, MSC, Hamburg Süd; propiedad de e2open desde 2018. Acepta SI vía API/EDI (EDIFACT IFTMINb) y la enruta al carrier final. **Para SSB queda como plan B** — a contratar solo si Hapag sube volumen o si un segundo cliente SSB lo requiere. No resuelve Log-In (no está en INTTRA). |
+| **eBL** | *electronic Bill of Lading*. Versión digital del BL con validez legal equivalente al papel. Hapag-Lloyd emite eBL vía IQAX o WaveBL (plataformas terceras). Maersk tiene su propio flujo eBL. No aplica a Log-In. |
+| **OAuth 2.0** | Estándar de autorización usado por Maersk y Hapag-Lloyd. Maersk usa *client credentials flow* (server-to-server), Hapag *authorization code*. |
 
 ### Entidades técnicas del proyecto
 | Término | Significado |
@@ -558,12 +538,14 @@ OCR pendiente en n8n para completar archivado automático de CRT (los digitales 
 
 ## 13. Principios operativos que guían el dashboard
 
-1. **Automatizar sin reemplazar decisiones humanas.** El documental sigue aprobando el BL, el dashboard asiste.
+1. **Automatizar sin reemplazar decisiones humanas.** El documental sigue aprobando el BL y el envío de mails. El dashboard asiste intensivamente pero los gates siguen humanos.
 2. **El 304 es la fuente única de verdad del ofrecimiento.** Se persiste crudo antes de procesarse.
 3. **Idempotencia absoluta.** Mismo 304 reenviado no duplica efectos.
-4. **Trazabilidad completa.** Logging de entradas, salidas, estados, timestamps.
-5. **Sin acoplamiento a lógica interna de Metric/Importer.** Solo APIs estables y contratos públicos.
+4. **Trazabilidad completa.** Logging de entradas, salidas, estados, timestamps, acciones del operador (who/when/what).
+5. **Sin acoplamiento a lógica interna de Metric/Importer.** Solo APIs estables y contratos push confirmados.
 6. **Validar con Brian/Santiago antes de apoyarse en código legacy.**
+7. **Los documentos se adelantan al cliente apenas estén aprobados.** No se espera a tener todo junto — cada doc se envía cuando está listo.
+8. **Arquitectura de adapters por carrier** (propuesto 24/04, a cerrar próxima sesión). Cada naviera se trata como caja negra con interface común; la heterogeneidad técnica no se filtra al resto del sistema.
 
 ---
 
@@ -571,10 +553,10 @@ OCR pendiente en n8n para completar archivado automático de CRT (los digitales 
 
 Estos proyectos existen en paralelo. **No se arrastran por defecto al diseño del dashboard**. Se integran o aportan conceptos solo cuando corresponda.
 
-- **Validador Aduanal** (`validador-aduanal`): web app en Netlify + Supabase. Parsea planillas de aduana. Puede integrarse al dashboard para el módulo de declaración de BL (P1).
+- **Validador Aduanal** (`validador-aduanal`): web app en Netlify + Supabase. Parsea planillas de aduana. **Absorbido al dashboard en R1 del MVP**; standalone se discontinúa (NG16).
 - **Tarifa Schedule** (`tarifa-schedule`): HTML con tarifas y schedule de servicios marítimos. En pausa.
-- **Inbox Triage** (`ssb-inbox-triage`): asistente inteligente de correo con clasificación IA. En desarrollo activo. Puede aportar patrones de clasificación para el mailing automático al cliente (P3).
+- **Inbox Triage** (`ssb-inbox-triage`): asistente inteligente de correo con clasificación IA. En desarrollo activo. Fuera del MVP (NG13); evaluable para fase 2.
 
 ---
 
-*Última actualización: 22/04/2026 (cierre tarde). Se actualiza cuando aparece un concepto nuevo del dominio o cambia la operativa.*
+*Última actualización: 24/04/2026. Se actualiza cuando aparece un concepto nuevo del dominio o cambia la operativa.*

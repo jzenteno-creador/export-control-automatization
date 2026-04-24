@@ -1,7 +1,7 @@
 # Preguntas abiertas
 
 **Proyecto**: SSB-IT-RESEARCH
-**Última actualización**: 22/04/2026 (cierre tarde)
+**Última actualización**: 24/04/2026
 
 Priorizadas por impacto en diseño. Marcar con ✅ al cerrarse.
 
@@ -17,8 +17,8 @@ Priorizadas por impacto en diseño. Marcar con ✅ al cerrarse.
 - **Resolución**:
   - **Opción elegida**: B (webhook desde Importer Laravel). Brian agrega al Importer una llamada HTTP POST saliente al dashboard después de recibir el 304 en `/api/orders/store`.
   - **Opciones descartadas**: A (SAP doble envío — Dow no lo hace), C (pull via ConsultaOrder — latencia, no event-driven), D (Metric — no persiste crudo, no idempotente, no emite eventos salientes; investigación completa en `research.md` sección 4).
-  - **Walking Skeleton**: endpoint receptor deployado el 22/04 en Supabase (`https://cctuowthpnstvdgjuomq.supabase.co/functions/v1/ingest-304`). Verificado con 5 tests iniciales + 11 JSONs reales cargados manualmente el 22/04 tarde.
-  - **Pedido a Brian**: mail enviado el 22/04 con URL, headers, contrato mínimo. Esperando confirmación de viabilidad técnica — **responde mañana 23/04 a las 9 AM**.
+  - **Walking Skeleton**: endpoint receptor desplegado el 22/04 en Supabase (`https://cctuowthpnstvdgjuomq.supabase.co/functions/v1/ingest-304`). Verificado con 5 tests + 11 JSONs reales cargados 22/04 tarde.
+  - **Pedido a Brian**: mail enviado el 22/04 con URL, headers, contrato mínimo. Esperando confirmación de viabilidad técnica.
 
 ### Q2 — ¿Existe el flujo Importer → Metric? ¿Cómo funciona? ✅
 - **Quién responde**: Brian / Santiago (originalmente). Resuelta por investigación directa de código.
@@ -31,11 +31,12 @@ Priorizadas por impacto en diseño. Marcar con ✅ al cerrarse.
 ### Q3 — ¿Existe un contrato estable (API, evento) que Metric exponga para avisar cambios de estado de orden?
 - **Quién responde**: Brian / Santiago
 - **Eventos relevantes**: orden despachada, orden embarcada, orden arribada.
-- **Por qué importa**: alimenta las etapas 2, 9 del workflow (tracking). También alimenta el mailing al cliente cuando se dispara documentación post-despacho (etapa 7).
-- **Estado**: **parcialmente resuelta (22/04)**.
-  - **Lado del mailing al cliente (cerrado empíricamente)**: la regla del mailing sale del 304 mismo, no depende de un evento de Metric. Se compone de: (a) parseo del campo `BusinessInstructionsReferenceNumberNotes` (instrucciones del exportador, fuente principal), (b) entidad `N1` del 304 como fallback universal (confirmado 11/11 en la muestra). Detalle en `business-context.md` sección 7bis. Overrides manuales por cliente configurables desde la web (funcionalidad a implementar en fase 2/3).
-  - **Lado del tracking post-despacho (queda abierto)**: Metric **no emite webhooks salientes** cuando recibe o cambia una orden. El único outbound HTTP visible es `requests.post('https://rica.elemica.com/upload/SSB_Prod', ...)` que emite 315 a Elemica (middleware B2B de Dow), triggered desde el frontend, no event-driven.
-  - **Consecuencia pendiente**: si el dashboard necesita reaccionar a eventos de tracking (sailing date, arrival, etc.), el camino más probable es **polling o lectura directa de la DB de Metric** (si se negocia acceso read-only) — no webhooks. Alternativa: consumir los 315 directamente de SAP si hay forma, pero requiere coordinación con Dow. Queda abierta para discutir con Brian cuando lleguemos a la etapa 9 del workflow.
+- **Por qué importa**: alimenta las etapas 2, 9 del workflow (tracking).
+- **Estado**: **parcialmente resuelta (23/04)**. Jona confirma que puede solicitar a Santiago:
+  1. Endpoint de consulta (pull) al dashboard que lea estado de coordinación y eventos.
+  2. **Replicación push** del 301 y 315 al dashboard cuando Metric los emite a SAP. Mismo patrón que el webhook del Importer con el 304.
+- **Decisión provisional**: arrancar con push simétrico al 304. Bidirección: Jona también puede exponer endpoints de consulta al equipo de Metric si les sirve info que esté en el dashboard.
+- Queda abierta pendiente de conversación formal con Santiago para acordar alcance del push.
 
 ### Q4 — ¿El flujo de exportación (órdenes tipo `E`) entra por `orders/store` y `shipments/store`? ¿Hay diferencias en el payload respecto a importación?
 - **Quién responde**: Brian / Santiago
@@ -66,7 +67,7 @@ Priorizadas por impacto en diseño. Marcar con ✅ al cerrarse.
 ### Q8 — ¿Cuál es el schema exacto del JSON del 304? ✅
 - **Quién responde**: el módulo "Logs de JSON" del Importer (tarea propia).
 - **Por qué importa**: sin el schema no se puede modelar `orders` ni `inbound_events`.
-- **Estado**: **cerrada (22/04)**. Se descargaron 11 JSONs reales del módulo Logs de JSON. Schema documentado en `research.md` sección 7. Validación empírica adicional completada el 22/04 tarde (sección 7.13). Quedan 10 sub-preguntas de detalle (Q15-Q24) derivadas del análisis.
+- **Estado**: **cerrada (22/04)**. Se descargaron 11 JSONs reales del módulo Logs de JSON. Schema documentado en `research.md` sección 7. Quedan 10 sub-preguntas de detalle (Q15-Q24) derivadas del análisis.
 
 ### Q9 — ¿Acceso al módulo "Logs de JSON" del Importer? ✅
 - **Quién responde**: Brian (si el acceso actual a UAT no alcanza).
@@ -91,7 +92,7 @@ Priorizadas por impacto en diseño. Marcar con ✅ al cerrarse.
 ### Q12 — ¿Cuál es el flujo as-is completo de una orden de exportación hoy?
 - **Quién responde**: equipo de documentación (2 personas).
 - **Por qué importa**: mapear qué automatizar y qué mantener manual. Preguntas 13, 14 derivan de esta.
-- **Estado**: **parcialmente cubierta (22/04)**. Flujo documentado en `business-context.md` sección 7 (fases 1-5). Falta validación formal con Santiago y documentales para confirmar excepciones y detalles.
+- **Estado**: abierta. Tarea operativa propia de Jona. Parcialmente cubierto en `business-context.md` §7 con lo que ya aportó Jona; falta validar con documentales.
 
 ### Q13 — ¿Cuáles son las excepciones recurrentes al flujo estándar?
 - **Quién responde**: equipo de documentación.
@@ -101,7 +102,7 @@ Priorizadas por impacto en diseño. Marcar con ✅ al cerrarse.
 ### Q14 — ¿Qué documentos acompañan una orden de exportación tipo (factura, CRT, certificado de origen, packing list, BL) y cuál es el ciclo de vida de cada uno?
 - **Quién responde**: equipo de documentación.
 - **Por qué importa**: define la etapa 7 del workflow (envío al cliente).
-- **Estado**: **parcialmente cubierta (22/04)**. Documentos listados en `business-context.md` sección 6. Falta detalle de ciclo de vida por documento y validación con documentales.
+- **Estado**: parcialmente respondida (23/04). Jona aportó el detalle operativo en sesión. Lo sistematizado queda en el Plan de Releases R2. Falta validación con el equipo.
 
 ---
 
@@ -117,7 +118,7 @@ Preguntas que cierran el schema definitivamente. Ver `research.md` sección 7.12
   - `4010...` = **STO** (Stock Transfer Order, intercompany Dow → Dow). Estructura mínima porque no hay vendor externo, no hay contrato comercial, no hay consignatario externo que declarar a AES.
   - **El prefijo es estable**: todas las trade arrancan con `0118`, todas las STO con `4010`. Sin excepciones reportadas.
   - **Consecuencia operativa clave**: en STO la documentación se envía siempre al mismo forwarder del lado del destino (típicamente Brasil). Flujo más estandarizado, destinos recurrentes (Santos, Navegantes, Rio de Janeiro, Paranaguá, Itajaí). En trade, el destinatario del mailing y las instrucciones específicas se leen del campo `BusinessInstructionsReferenceNumberNotes` del 304 y pueden variar orden a orden.
-- **Implicancia para el dashboard**: el destinatario del mailing en STO puede resolverse con tabla maestra (cliente STO → forwarder destino). En trade requiere parseo IA del campo `BusinessInstructionsReferenceNumberNotes`. Documentar en `business-context.md` sección 4.3.
+- **Implicancia para el dashboard**: el destinatario del mailing en STO puede resolverse con tabla maestra (cliente STO → forwarder destino). En trade requiere parseo IA del campo `BusinessInstructionsReferenceNumberNotes` (TXT 107). Documentar en `business-context.md` sección 4.3.
 
 ### Q16 — ¿Cuál es el mapa completo de shipping points / plantas Dow? Códigos vistos: `D116`, `D146`, `D147`, `D176`.
 - **Quién responde**: Brian / Santiago, o documentación interna de Dow.
@@ -181,7 +182,7 @@ Preguntas que cierran el schema definitivamente. Ver `research.md` sección 7.12
 - **Quién responde**: Brian.
 - **Contexto**: es el pedido formal enviado por mail el 22/04. Tiene OK de Mariano.
 - **Por qué importa**: si Brian dice que no, hay que volver a evaluar alternativas (SFTP, cola intermedia, modificar SAP). Si dice que sí, se coordina implementación.
-- **Estado**: **abierta — responde mañana 23/04 a las 9 AM**. Bloquea siguiente milestone (conectar el endpoint del Walking Skeleton con datos reales de producción).
+- **Estado**: abierta. **Bloquea siguiente milestone** (conectar el endpoint del Walking Skeleton con datos reales de producción). Sin respuesta al 24/04.
 
 ### Q26 — ¿El módulo "Logs de JSON" del Importer guarda el 304 de forma idempotente? Si SAP reenvía el mismo 304, ¿se duplica o se detecta?
 - **Quién responde**: Brian.
@@ -197,23 +198,79 @@ Preguntas que cierran el schema definitivamente. Ver `research.md` sección 7.12
 
 ---
 
-## Derivadas del análisis empírico de los 11 JSONs (22/04 tarde)
+## Operativas — surgen del cierre de Goals/Non-goals (23/04)
 
-### Q28 — ¿Qué países/clientes/tipos de orden exigen COO físico (courier/correo postal) y no solo digital?
-- **Quién responde**: equipo de documentación (2 personas).
-- **Contexto**: durante la sesión del 22/04 Jona confirmó que el ~95% de la documentación al cliente se envía electrónicamente. El caso único que requiere envío físico es cuando el cliente necesita el **Certificado de Origen (COO) físico** (con firma y sello reales de la Cámara Argentina de Comercio). Son pocos y puntuales.
-- **Por qué importa**: el dashboard necesita un flag derivado `requiere_envio_fisico` por orden. Sin una regla clara (países, clientes, tipo de producto), ese flag tiene que ser manual para cada orden. Con una regla (ej: "COO físico obligatorio para cliente X, o para país destino Y"), se puede derivar automáticamente.
-- **Opciones de regla**:
-  - Lista cerrada de clientes que siempre requieren físico.
-  - Lista de países destino cuyo régimen aduanero lo exige.
-  - Marcar manualmente por orden (fallback si no hay regla estable).
-- **Estado**: abierta. Tarea operativa propia + consulta a documentales.
-
-### Q29 — ¿Existe hoy en SSB una tabla maestra que mapee `cliente_STO → despachante_destino`?
-- **Quién responde**: Santiago / equipo documental / líder de equipo.
-- **Contexto**: validación empírica del 22/04 tarde confirmó que en STO (prefijo `4010...`) el notify del 304 es casi siempre un despachante conocido del lado destino (Comissaria Pibernat para Brasil, BDP International para Chile, etc.). Si existe una tabla maestra con este mapeo, el mailing STO se automatiza sin IA en fase 1/2 (simple lookup por cliente_STO).
-- **Por qué importa**: si existe la tabla, el trabajo de automatización del mailing STO es **simple lookup**. Si no existe, hay que armarla con los datos históricos + validación. Cambia el timing de cuándo podemos automatizar mailing STO.
+### Q28 — ¿Qué países/clientes requieren COO físico (firmado por Cámara Arg. de Comercio) y no digital?
+- **Quién responde**: equipo de documentación.
+- **Por qué importa**: determina qué fracción de órdenes necesita el canal de mail físico (escáner → dashboard). Si es <5%, queda como caso edge. Si es mayor, conviene modelar bien.
 - **Estado**: abierta.
+
+### Q29 — ¿Existe una tabla maestra cliente STO → forwarder destino que se pueda sistematizar?
+- **Quién responde**: Santiago / líder de equipo.
+- **Por qué importa**: R2 depende de esta tabla para resolver destinatarios de mailing de órdenes STO sin parsear TXT 107 (ver Goals v5 G8, `business-context.md` 4.3).
+- **Estado**: abierta.
+
+### Q30 — ¿Cuál es el canal actual por donde se recibe el reporte VGM desde Bahía Blanca, y puede automatizarse el envío?
+- **Quién responde**: Jona + operador de balanza en planta.
+- **Contexto confirmado 23/04**: el reporte lo baja una persona y lo comparte por mail. A veces no está disponible el viernes; se solicita el lunes. SSB hace la limpieza y toma la última pesada con un control.
+- **Por qué importa**: define si R3 arranca con upload manual o con mail dedicado + parseo automático.
+- **Estado**: abierta. Dato preliminar: por mail → upload manual del operador.
+
+### Q31 — ¿Log-In, Maersk o Hapag-Lloyd ofrecen alguna API para carga de VGM que no requiera el portal web ni el mail?
+- **Quién responde**: comercial SSB (contacto con cada naviera) o search en docs oficiales.
+- **Contexto confirmado 24/04**: research completo en `research-apis-carriers.md`. Maersk tiene API de VGM en su Developer Portal ([developer.maersk.com/api-catalogue/VGM/Learn-more](https://developer.maersk.com/api-catalogue/VGM/Learn-more)) — consumible una vez que se tenga Customer Code. Hapag-Lloyd y Log-In no publican API para VGM. Para R3 inicial, el canal sigue siendo Excel + mail para los 3.
+- **Por qué importa**: si alguna lo tiene, R3 podría incluir envío automático online para esa naviera. Si ninguna, confirmamos NG12 definitivo.
+- **Estado**: parcialmente resuelta (24/04). Decisión provisional: R3 arranca con Excel + mail para los 3; integración API Maersk VGM se evalúa como mejora si aparece Customer Code antes de R3.
+
+### Q32 — ¿Cuál es el regex del número de permiso de exportación?
+- **Quién responde**: Jona (tarea propia de Claude Code con muestra de permisos).
+- **Contexto**: ejemplos vistos: `25003EC03002997S`, `26003EC01001808H`. Formato aparente: `{YY}{NNN}EC{NN}{NNNNNNN}{L}`.
+- **Por qué importa**: R1 valida el permiso que viene en la planilla de aduana contra este formato antes de cruzar con el reporte Interlog.
+- **Estado**: abierta.
+
+### Q33 — Santiago: implementar endpoint de consulta + push 301/315 simétrico al Importer.
+- **Quién responde**: Santiago.
+- **Por qué importa**: **bloquea R4** (tracking).
+- **Estado**: abierta. A coordinar una vez que Brian confirme (Q25).
+
+---
+
+## APIs de navieras (24/04) — derivadas del research + mails enviados
+
+### Q34 — ¿Log-In ofrece alguna forma de automatización no-UI para submit de SI y descarga de BL draft?
+- **Quién responde**: Log-In (área comercial / IT).
+- **Contexto**: mail enviado por Jona el 24/04 preguntando por API directa, EDI, SFTP, hub alternativo, o cualquier otro canal estructurado. Research externo (`research-apis-carriers.md` §4) confirma que no hay developer portal público, no está en DCSA, no aparece en INTTRA. Log-Aí es solo UI web con login/password.
+- **Por qué importa**: **bloquea la decisión de cómo integrar Log-In en R1**. Log-In es 60-70% del volumen de SSB — si ofrecen cualquier canal automatizado, cambia materialmente la propuesta de R1. Si no ofrecen nada, R1 arranca en modo asistido + evaluación de RPA sobre Log-Aí.
+- **Estado**: abierta. Sin respuesta al 24/04.
+
+### Q35 — ¿Maersk tiene algún programa de onboarding API específico para forwarders LATAM o para cuentas Dow?
+- **Quién responde**: Maersk (área técnica).
+- **Contexto**: mail enviado por Jona el 24/04 después de conversación verbal con vendor local. El vendor derivó la consulta al sector técnico por mail. Research en `research-apis-carriers.md` §2 confirma que el Developer Portal es self-service, pero el Customer Code A136 PBB/Dow se gestiona localmente.
+- **Por qué importa**: información — no bloquea nada. Si existe onboarding dedicado con SLA y soporte técnico, reduce el riesgo de R1 Maersk. Si no, seguimos el path self-service.
+- **Estado**: abierta. Sin respuesta al 24/04.
+
+### Q36 — Cotización INTTRA / e2open para SSB (plan B).
+- **Quién responde**: área comercial e2open / INTTRA.
+- **Contexto**: research en `research-apis-carriers.md` §2.5, §3.7, §5 decisión 2. INTTRA resolvería Hapag-Lloyd (y daría canal redundante para Maersk) pero **no resuelve Log-In**. Dado el bajo volumen de Hapag en SSB, contratar hoy no se justifica. Queda reservado como plan B.
+- **Por qué importa**: tener la cotización lista permite decidir rápido si Hapag empieza a subir volumen o si aparece un segundo cliente SSB que lo requiera.
+- **Estado**: **no se cotiza hoy**. A reevaluar si alguno de los disparadores ocurre. Diferida.
+
+### Q37 — Obtener Customer Code Maersk vinculado a cuenta A136 PBB/Dow.
+- **Quién responde**: oficina local Maersk Argentina (con apoyo comercial SSB que gestione la relación).
+- **Contexto**: las Customer APIs de Maersk en el Developer Portal requieren que el consumer key esté asociado a al menos 1 Customer Code válido. Para obtener datos reales de órdenes PBB, el código tiene que ser el de la cuenta A136. Self-service en el portal no lo genera — lo asigna la oficina local.
+- **Por qué importa**: **bloqueante de R1 Maersk**. Sin Customer Code, el desarrollo puede avanzar contra mocks DCSA, pero la integración real no.
+- **Estado**: abierta. Jona lo genera la próxima sesión (24/04 cerrado para hoy).
+
+### Q38 — Confirmación técnica de las 5 decisiones de diseño del research de APIs.
+- **Quién responde**: Jona + Claude en próxima sesión (no requiere tercero).
+- **Contexto**: ver `research-apis-carriers.md` §5. Las 5 decisiones quedan enumeradas, no tomadas:
+  1. Arquitectura de adapters por carrier (interface común, implementación distinta).
+  2. INTTRA plan B (no se contrata hoy).
+  3. Orden de arranque R1: eje técnico Maersk + eje UX Log-In; no los 3 en paralelo.
+  4. DCSA BL 3.0 como contrato interno (canonical model).
+  5. Orden de onboarding Maersk (registro → app → keys → productos → Customer Code → Visibility Studio support mail).
+- **Por qué importa**: estas decisiones ajustan R1 en el plan. Sin tomarlas, el plan.md queda desactualizado.
+- **Estado**: abierta. **Primer punto de la próxima sesión.**
 
 ---
 
@@ -224,7 +281,7 @@ Preguntas que cierran el schema definitivamente. Ver `research.md` sección 7.12
 - **Estado**: decisión diferida. Se evalúa si aparece el caso de uso.
 
 ### D2 — ¿Push del commit a GitHub ahora o después? ✅
-- **Estado**: **cerrada (22/04)**. Push completado. Commits en remoto: `9529b5b` (cleanup), `4aedd4a` (Walking Skeleton), `7078467` (docs del Walking Skeleton), `33168a2` (5 .md vivos), `292cfca` (normalización permisos).
+- **Estado**: **cerrada (22/04)**. Push completado.
 
 ### D3 — ¿Manual de configuración de VS Code se genera ahora o después de la primera sesión de coding real?
 - **Estado**: abierta. No urgente.
@@ -232,16 +289,20 @@ Preguntas que cierran el schema definitivamente. Ver `research.md` sección 7.12
 ### D4 — ¿Co-authorship "Claude Opus 4.7" en commits sí o no?
 - **Estado**: abierta.
 
-### D5 — ¿`business-context.md` va como 5° archivo vivo del proyecto SSB-IT-RESEARCH? ✅
-- **Contexto**: Jona tiene un business context base que usa en otros proyectos. Quedó propuesto combinarlo con lo nuevo del dashboard en un archivo propio del proyecto.
-- **Estado**: **cerrada (22/04)**. Confirmado. `business-context.md` es archivo vivo del proyecto. Adicionalmente, desde el 22/04 se sumaron `walking-skeleton.md` (6°) y `sesion-actual.md` (7°, handoff efímero) como archivos vivos — ver `plan.md` sección 6.
+### D5 — ¿`business-context.md` va como archivo vivo del proyecto? ✅
+- **Estado**: **cerrada (22/04)**. Confirmado.
 
 ### D6 — ¿Mantener plan free de Supabase o upgrade a Pro cuando Brian conecte el endpoint?
 - **Contexto**: el Walking Skeleton está en plan free (500 MB DB, 2 GB transfer). A 150-200 órdenes/mes × ~15 KB ≈ 30 KB/mes, el free alcanza por años. Pero Pro trae backups diarios, 7 días de point-in-time recovery, y 100 GB storage. Son USD 25/mes.
 - **Estado**: abierta. Decisión a tomar cuando Brian confirme integración y empiece a fluir tráfico real.
 
-### D7 — ¿Alinear nombre de variable `SUPABASE_WEBHOOK_SECRET` → `WEBHOOK_SECRET` en `.env.local.example`?
-- **Contexto**: el script del paso 2 del 22/04 tarde (carga de 11 JSONs) descubrió que el `.env.local` usa `WEBHOOK_SECRET` (sin prefijo), pero varios prompts antiguos y docs mencionan `SUPABASE_WEBHOOK_SECRET`. Claude Code usó el correcto por inferencia, pero el `.env.local.example` sigue desalineado.
-- **Opciones**: (a) renombrar en `.env.local.example` para reflejar el uso real, (b) renombrar en `.env.local` para que matchee el prefijo anterior.
-- **Recomendación**: opción (a) — usar `WEBHOOK_SECRET` sin prefijo. Más corto y consistente con la única aplicación que lo usa.
-- **Estado**: abierta, baja prioridad. Tarea de 2 minutos para próxima sesión.
+### D7 — Renombrar `SUPABASE_WEBHOOK_SECRET` → `WEBHOOK_SECRET` en `.env.local.example`. ✅
+- **Contexto**: el script de carga del 22/04 tarde descubrió que `.env.local` usa `WEBHOOK_SECRET` (sin prefijo), pero varios prompts antiguos y docs mencionaban `SUPABASE_WEBHOOK_SECRET`. Claude Code usó el correcto por inferencia, pero el `.env.local.example` estaba desalineado.
+- **Estado**: **cerrada (22/04 tarde) por commit `6b05fd1`**. Descubierto en el análisis previo de Claude Code en la sesión del 23/04 (al intentar ejecutar D7, encontró que ya estaba alineado — el handoff del 22/04 la había listado incorrectamente como pendiente). Sin acción adicional necesaria.
+
+### D8 — Renombrar `openssl rand -base64 32` → `openssl rand -hex 24` en `.env.local.example` línea 21.
+- **Contexto**: observación colateral del análisis previo de Claude Code en la sesión del 23/04. El handoff del 22/04 lo había listado como pendiente y no se ejecutó.
+- **Por qué importa**: consistencia con lo que el equipo usa realmente para generar el secret. Trivial.
+- **Estado**: abierta. 2 min en Claude Code en próxima sesión de coding.
+
+---

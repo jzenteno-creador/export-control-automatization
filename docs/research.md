@@ -2,8 +2,8 @@
 
 **Proyecto**: SSB-IT-RESEARCH
 **Autor**: Jona Zenteno
-**Última actualización**: 22/04/2026 (cierre tarde)
-**Estado**: investigación con Walking Skeleton desplegado + 11 JSONs reales cargados y analizados vía SQL. Hallazgos empíricos incorporados en sección 7.13.
+**Última actualización**: 24/04/2026 (research APIs navieras)
+**Estado**: investigación con Walking Skeleton desplegado + 11 JSONs reales cargados y analizados vía SQL. Hallazgos empíricos incorporados en sección 7.13. **Nuevo 24/04**: research técnico de APIs de carriers (Maersk, Hapag-Lloyd, Log-In) incorporado en sección 8. Archivo aparte con detalle: `research-apis-carriers.md`.
 
 ---
 
@@ -786,5 +786,100 @@ Las 3 órdenes de Pibernat tienen `BusinessInstructionsReferenceNumberNotes` de 
 | Trade / STO | 6 / 5 | 6 / 5 | ✅ Confirmado |
 | Marítimo / Terrestre | 8 / 3 | 8 / 3 | ✅ Confirmado |
 | Incoterms presentes | CPT, CFR, FCA | CPT, CFR, FCA | ✅ Confirmado |
+
+---
+
+## 8. APIs de navieras — research técnico (24/04/2026)
+
+R1 del MVP incluye **generación de declaración de embarque** (Shipping Instruction / SI) y **control del BL draft**. Hasta el 23/04 el supuesto tácito era que el dashboard armaría la SI internamente y el documental la cargaría manualmente en el portal de cada naviera. El 24/04 Jona abrió una investigación para evaluar si las 3 navieras principales (Log-In, Maersk, Hapag-Lloyd) ofrecen API de submit de SI y retorno del BL draft — lo que cambiaría R1 de "dashboard asistido" a "dashboard end-to-end".
+
+**Archivo con el research completo**: `research-apis-carriers.md` (en este mismo directorio). Acá queda el resumen ejecutivo y los findings necesarios para que el resto de los .md tengan contexto sin tener que abrir el archivo grande.
+
+### 8.1 BLUF del research
+
+Los 3 carriers tienen madurez técnica muy asimétrica:
+
+| Carrier | Volumen SSB | Submit SI por API | Get BL draft | Estado general |
+|---|---|---|---|---|
+| **Log-In** | 60-70% (principal) | **No** | **No** | Solo portal web Log-Aí. No tiene developer portal, no está en DCSA, no hay APIs públicas documentadas. Pendiente respuesta del mail enviado. |
+| **Maersk** | 2do volumen | **Sí productivo** (DCSA BL 3.0 + INTTRA) | **Sí** | Developer Portal con OAuth2. 6 APIs DCSA productivas. Bloqueante: Customer Code vinculado a cuenta A136 PBB/Dow. |
+| **Hapag-Lloyd** | 3ro volumen (bajo) | **No en catálogo público** | No público | T&T DCSA + Schedules sí; submit de SI no. Canal alternativo real: INTTRA. Dado el bajo volumen, **INTTRA marcado como plan B, no plan A**. |
+
+### 8.2 Hallazgos factuales (datos oficiales de los portales)
+
+**Maersk** — Developer Portal en [developer.maersk.com/api-catalogue](https://developer.maersk.com/api-catalogue):
+
+- Productos DCSA relevantes para R1: **Ocean Booking v2 [DCSA]**, **Ocean Booking Status Webhook [DCSA]**, **Ocean – Carrier Bill of Lading [DCSA]** (cubre submit de SI + retorno de Transport Document/draft BL + BL final), **Ocean Commercial Schedules [DCSA]**.
+- Productos de tracking (para R4): **Track and Trace Plus**, **Maersk Visibility Studio** (con webhook push).
+- Auth: OAuth 2.0 client credentials flow. Endpoints REST JSON.
+- Rate limits por consumer key, HTTP 429 en exceso.
+- Onboarding self-service en [accounts.maersk.com/developer-maeu/user/register](https://accounts.maersk.com/developer-maeu/user/register). Mail corporativo obligatorio para Customer APIs.
+- **Bloqueante real**: las Customer APIs requieren al menos 1 Customer Code válido de Maersk vinculado al consumer key. Para que responda con datos de órdenes PBB/Dow, tiene que ser el código de cuenta A136. Esto se pide a la oficina local Maersk Argentina — no lo genera el portal.
+- **Canal alternativo**: INTTRA / e2open. Maersk confirma oficialmente que acepta SI vía INTTRA sin intervención manual ([Maersk BL transfer 2025](https://www.maersk.com/news/articles/2025/03/11/digital-solutions-update-bill-of-lading-transfer)).
+- **Draft BL / Verify Copy**: desde 15-sept-2025 Maersk discontinuó pedidos manuales por mail. Las vías válidas son (a) API DCSA Transport Document, (b) suscripción a notificación email con PDF adjunto, (c) descarga del portal.
+- Maersk también soporta **EDI IFTMIN D99B** bilateral para clientes con volumen.
+
+**Hapag-Lloyd** — Developer Portal en [api-portal.hlag.com](https://api-portal.hlag.com/):
+
+- Productos públicos: **Track & Trace (DCSA 2.2)** en BETA pública, **Quick Quotes**, **Quick Quotes Spot**, **Routing**, **Live Position**, **Reefer Monitoring**, **Commercial Schedules (DCSA)**.
+- **Submit SI: no hay API en catálogo público**. Las vías reales son: eaSI (PDF editable por mail/web), Hapag-Lloyd Navigator (portal web), INTTRA, EDI bilateral.
+- **Draft BL**: herramienta "BL Draft Approval" dentro del Navigator web. No hay API documentada para descarga del draft.
+- **eBL**: emite vía IQAX o WaveBL (plataformas terceras, requieren registro separado del cliente).
+- Auth: OAuth 2.0 Authorization Code. Onboarding manual — aprobación puede tardar semanas.
+- **Decisión de SSB**: dado que Hapag-Lloyd es bajo volumen (3ro), **INTTRA se marca como plan B, no se prioriza hoy**. Si algún día Hapag sube volumen o publica su SI API, se reevalúa.
+
+**Log-In** — sin developer portal conocido:
+
+- Único canal digital confirmado: **Log-Aí** (plataforma web en [logai.loginlogistica.com.br](https://logai.loginlogistica.com.br)) con login/password. Funcionalidades publicadas: booking online, tracking, envío/descarga de documentación.
+- No está en DCSA (DCSA son 10 carriers globales; Log-In es cabotagem Brasil + Mercosur).
+- No aparece en INTTRA ni en otros hubs conocidos.
+- **Respuesta oficial pendiente**: Jona envió mail el 24/04 a Log-In preguntando por API directa, EDI, hub alternativo. Sin respuesta al 24/04.
+- Inferencia razonable (sin confirmación): camino realista sería RPA sobre Log-Aí, email estructurado, o algún acuerdo bilateral si Log-In lo ofrece.
+- **Impacto**: Log-In concentra el mayor volumen, y es el carrier con menor madurez técnica. Asimetría clave que R1 tiene que absorber.
+
+### 8.3 Estándar DCSA — por qué importa
+
+**DCSA** (Digital Container Shipping Association): asociación fundada en 2019 por Maersk, MSC, CMA CGM, Hapag-Lloyd, ONE, Evergreen, Yang Ming, HMM y ZIM (PIL se sumó en 2024). Publica specs públicas de API para container shipping, alineadas con UN/CEFACT e IMO.
+
+Estándares relevantes para R1:
+
+- **DCSA Booking 2.0** — define el contrato de datos de una reserva (booking). Finalizado febrero-2025.
+- **DCSA Bill of Lading 3.0** — incluye módulos de Shipping Instructions, Transport Document (draft + final), eBL Issuance, eBL Surrender. Finalizado febrero-2025.
+
+Maersk tiene implementaciones productivas de ambos. Hapag-Lloyd tiene el roadmap pero no expuesto públicamente aún. Log-In no es miembro y no se espera adopción en el corto plazo.
+
+**Valor estratégico para SSB**: adoptar DCSA como **modelo de datos interno** (canonical model) desacopla el dashboard de la diversidad de canales. Un solo contrato interno que se traduce a REST Maersk, EDI INTTRA (si algún día lo usamos), scraping Log-Aí, o lo que venga. Se documenta como decisión pendiente de análisis en `plan.md` y se defiende con ejemplo de mapeo 304 → DCSA la próxima sesión.
+
+Repos de referencia DCSA:
+- [github.com/dcsaorg/DCSA-OpenAPI](https://github.com/dcsaorg/DCSA-OpenAPI) — specs OpenAPI.
+- [github.com/dcsaorg/DCSA-EBL](https://github.com/dcsaorg/DCSA-EBL) — implementación de referencia Java.
+
+### 8.4 5 decisiones de diseño que este research habilita
+
+El research abrió 5 decisiones grandes de arquitectura R1. Quedan **enumeradas, no tomadas**. Las analizamos con cabeza fresca al inicio de la próxima sesión.
+
+1. **Arquitectura de adapters por carrier**. Que el dashboard trate a cada carrier como caja negra que implementa `submitSI()` + `onDraftBLReady()`. Maersk usa API nativa, Hapag vía INTTRA plan B, Log-In vía RPA/email estructurado. Interface común adentro, implementaciones distintas. Desacopla al resto del sistema de la heterogeneidad técnica.
+2. **Contratar INTTRA / e2open**. Resolvería Hapag-Lloyd y daría canal redundante para Maersk. **No resolvería Log-In**. Dado que Hapag es bajo volumen, **queda como plan B, a evaluar solo si Hapag sube volumen o si una segunda línea de negocio (otro cliente SSB) lo requiere**.
+3. **Orden de arranque de R1**. Eje técnico por Maersk (API madura, feedback rápido, menor riesgo, sirve de referencia para el modelo de datos DCSA). Eje de proceso/UX por Log-In (ahí está el volumen y el dolor manual). No arrancar los 3 en paralelo.
+4. **DCSA Bill of Lading 3.0 como contrato interno**. El dashboard traduce una sola vez (304 → DCSA en el borde) y todo adentro habla DCSA. Cuando Hapag publique su SI API, ya está hecha media integración. Para Log-In es un contrato estable aunque nunca adopte DCSA.
+5. **Orden de onboarding Maersk**. 1) registrar en developer portal (10 min), 2) crear app y obtener consumer keys (5 min), 3) suscribir los 6 productos DCSA + Visibility Studio (15 min), 4) pedir Customer Code A136 a oficina local Maersk AR (días-semanas), 5) pedir aprobación Visibility Studio por mail separado ([MVSAPISupport@maersk.com](mailto:MVSAPISupport@maersk.com)). Mientras el Customer Code está en trámite, Claude Code puede desarrollar contra mock services del portal + schemas DCSA de GitHub.
+
+### 8.5 Preguntas derivadas — en `preguntas.md`
+
+- Q34 — ¿Log-In ofrece alguna forma de automatización no-UI? (pendiente respuesta Log-In al mail del 24/04).
+- Q35 — ¿Maersk tiene algún programa de onboarding API específico para forwarders LATAM o cuentas Dow? (pendiente respuesta al mail del 24/04).
+- Q36 — Cotización INTTRA / e2open — solo si Hapag-Lloyd no publica su SI API y el volumen empieza a justificarlo.
+- Q37 — Customer Code Maersk vinculado a cuenta A136 PBB/Dow. Pedir a oficina local Maersk AR. **Bloqueante de R1 Maersk**.
+- Q38 — Confirmación técnica de las 5 decisiones de diseño del research. **A tomar al inicio de la próxima sesión**.
+
+### 8.6 Implicancia para el diseño de R1
+
+Con este research, R1 deja de ser "un único camino técnico para los 3 carriers" y pasa a ser "3 caminos asimétricos coordinados por un adapter common interface". Eso **no cambia el alcance funcional del MVP** (sigue siendo declaración de embarque + control BL marítimo), pero cambia la estrategia de implementación:
+
+- **Maersk**: API nativa, automatización end-to-end posible dentro del sprint técnico.
+- **Hapag-Lloyd**: bajo volumen, R1 puede arrancar en modo asistido (carga manual con dashboard que muestra el package pre-llenado) sin perder mucho valor. INTTRA queda reservado.
+- **Log-In**: depende de la respuesta del mail. Si Log-In dice "sí tenemos API/EDI/SFTP", R1 lo integra. Si dice "no hay nada", R1 arranca en modo asistido + evaluación de RPA.
+
+El `plan.md` **no se actualiza con esto en la sesión de 24/04** — las 5 decisiones se toman la próxima sesión con cabeza fresca, y recién ahí se ajustan R1 y el backlog.
 
 ---
