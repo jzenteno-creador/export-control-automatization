@@ -883,3 +883,131 @@ Con este research, R1 deja de ser "un único camino técnico para los 3 carriers
 El `plan.md` **no se actualiza con esto en la sesión de 24/04** — las 5 decisiones se toman la próxima sesión con cabeza fresca, y recién ahí se ajustan R1 y el backlog.
 
 ---
+
+---
+
+## 9. Análisis de 111 JSONs — hallazgos clave (29/04)
+
+**Muestra**: 11 manuales del 22/04 + 100 nuevos del 29/04 vía script contra `importer.ssbplatform.com`. STO=55, Trade=56.
+
+### 9.1 Regla estable: Item = Delivery = Contenedor
+
+Confirmado en 111/111 órdenes: `Items.length` = deliveries únicas = contenedores o camiones.
+
+- `Items[].ContainerDetails[].NumberOfContainers` repite el total del shipment por ítem → **NO usar para contar contenedores**.
+- `Items.length` es el contador correcto.
+- Número de delivery SAP: `Items[].ItemIdentification[0].ProductServiceIDQualifierVo` (qualifier VO).
+- Mostrar sin leading zeros: `parseInt(val, 10).toString()`.
+
+### 9.2 GMID y descripción de producto
+
+| Campo | Path en JSON | Ejemplo |
+|---|---|---|
+| GMID (18 dígitos) | `Items[].DescriptionMarksAndNumbers.CommodityCode` | `000000000000374367` |
+| GMID significativo (6 dígitos) | últimos 6 del CommodityCode | `374367` |
+| Descripción comercial | `Items[].DescriptionMarksAndNumbers.LadingDescription` | `DOWLEX(tm) TG 2085B Polyethylene Resin` |
+
+### 9.3 MOT: fallback por RouteDescription
+
+`RouteInformation[0].TransportationMethodTypeCode` vacío en algunas órdenes STO.
+
+- `O` → Marítimo
+- `M` → Terrestre
+- vacío → leer `RouteDescription`: `DSV/TT/TM-/SEA` → Marítimo; `FTL/CUST/PCKUP/AR-` → Terrestre
+
+110 explícitos + 1 inferido correctamente en la muestra.
+
+### 9.4 DeliveryLocation — normalización requerida
+
+17 valores únicos con inconsistencias de case (`Santos Port` vs `SANTOS PORT`). Schema normalizado aplica `UPPER(TRIM())` al ingestar.
+
+### 9.5 Discriminadores perfectos STO / Trade
+
+| Campo | STO | Trade |
+|---|---|---|
+| `TariffServiceCode` | `DP` (55/55) | `DD` (56/56) |
+| `TransportationTermsCode` | `CFR`, `FOB` | `CPT`, `CIP`, `FCA` |
+| Qualifiers `1V`/`CO`/`AEG` | nunca | siempre |
+
+### 9.6 Campos siempre constantes (metadata)
+
+`RoutingNumber` siempre `33708426259`, `SealNumber` siempre `NA`, `Hazardous` siempre `[]`, `CurrencyCode` siempre `USD`, `SCAC` siempre `SSB`.
+
+### 9.7 Entity identifiers — mapeo operativo corregido
+
+| Code | Rol correcto |
+|---|---|
+| `EX` | Exporter (PBB Polisur A136) |
+| `ST` | Ship-To (destinatario físico, fuente del país destino) |
+| `N1` | Notify Party |
+| `BT` | Bill-To |
+| `16` | Plant / Punto de despacho |
+| `NP` | Notify Party secundario |
+| `CN` | Consignee BL |
+| `DIR` | Distribution Recipient (NO "Director") |
+| `PK` | Doc. Recipient original |
+| `PK2`, `PK3` | Doc. Recipient copia 2/3 |
+| `AO` | Puerto de destino (Account Of) |
+
+### 9.8 BusinessInstructionsReferenceNumberNotes (TXT 107)
+
+Presente en 111/111 con 27 variantes únicas. Instrucciones al forwarder: BL, NCM, notify party, distribución de documentos, empaque ISPM 15, collect/prepaid. Campo de mayor valor operativo para R1. Persistir completo crudo + parseado. Nunca sobreescribir el crudo.
+
+---
+
+## 10. Legacy schema analysis — Importer + Metric (29/04)
+
+Análisis de `~/projects/importer` (Laravel 8) + `~/projects/metric-api` (Flask). Solo exportación Dow. Detalle completo en `docs/legacy-schema-analysis.md`.
+
+### 10.1 Hallazgos críticos
+
+1. Tablas master del Importer: `orders` + `shipments` (~80 columnas). Relacionadas por `orders.id ↔ shipments.order_id`. Ultra-anchas — el schema nuevo no replica esto.
+2. Claves de join estables: `purchase_order` y `shipment_number`.
+3. 301 a SAP: no se envía por HTTP — persiste en `report_301`. SAP lee por batch. [Confirmar con Santiago — Q44].
+4. 315 events: `VD` → `actual_departure_date` + `status_id=12`. `VA` → ETA + `status_id=9`.
+5. API Interlog [PRÓXIMA A PRODUCCIÓN]: `POST /prefolder/send` en Metric. PO + PDF base64 → JWT → `prefolder_operation_log` → mail Mailgun.
+6. Permiso de exportación: `orders.dispatch_number` (Importer) + `simis.nro_despacho` (Metric). Hoy manual. Slot natural para el dashboard.
+
+### 10.2 Tabla comparativa de entidades clave
+
+| Entidad | En JSON 304 | En Importer | En Metric |
+|---|---|---|---|
+| PO Number | `RefIdGeneral[PO]` | `orders.purchase_order` | `orders.purchase_order` |
+| Shipment Num. | `ShipmnetIdentificationNumber` | `shipments.shipment_number` | `shipments.shipment_number` |
+| Naviera/SCAC | `RouteInfo[].SCAC` (siempre SSB) | `shipments.carrier_id→carriers` | `carrier_leg` |
+| Buque/Vessel | no está | `shipments.vessel_id→vessels` | `expo_vessels` [?] |
+| ETD | `DateTimeRef[002]` (cargo ready) | `shipments.estimated_departure_date` | misma |
+| ETA | no está | `shipments.estimated_arrival_date` | misma |
+| BL Number | no está | `orders.bill_of_landing` (duplicado en shipments) | misma |
+| Puerto destino | `DeliveryLocation` + `PlaceOfDelivery` (24%) | `orders.destination_port_id→ports` | `dow_port` |
+| Permiso exportación | no está | `orders.dispatch_number` | `simis.nro_despacho` |
+| Instrucción Interlog | N/A | N/A | `prefolder_operation_log` |
+
+### 10.3 Inconsistencias que el schema nuevo no replica
+
+1. Doble path entidad↔orden (FK directa + pivote) → elegir uno.
+2. `bill_of_landing` duplicado en `orders` y `shipments` → una sola fuente.
+3. `shipments` ultra-ancha de ~80 columnas → schema nuevo comienza limpio.
+4. Sin transacciones en `OrderController::store` → el nuevo arranca con `BEGIN/COMMIT`.
+5. `log_jsons` solo cubre inbound. 301/315 en tablas separadas → dashboard unifica.
+
+---
+
+## 11. API Interlog + permisos de exportación (29/04)
+
+### 11.1 API Interlog — instrucción de exportación
+
+- **Estado**: próxima a producción en Metric.
+- **Endpoint**: `POST /prefolder/send` (prefolder_routes.py:700).
+- **Payload**: PO + PDF instrucción de exportación en base64.
+- **Flujo**: JWT → `prefolder_operation_log` → mail Mailgun si `send_email_on_success=1`.
+- **Sub-régimen**: `simis` JOIN por `dispatch_number = nro_despacho` con filtro `siglas='EC' AND tipo_operacion='permiso_embarque'`.
+
+### 11.2 Permisos de exportación — flujo planificado
+
+- **Origen**: Interlog envía permisos por mail.
+- **Destino**: casilla `ssbintn8n@ssbint.com` (n8n).
+- **Formato**: `{YY}{NNN}EC{NN}{NNNNNNN}{L}` — ej. `25003EC03002997S`.
+- **Estado actual**: nadie parsea estos mails. `simis.nro_despacho` se carga manual.
+- **Plan**: n8n lee la casilla, extrae el número, lo asocia por PO/despacho, lo persiste en el schema normalizado.
+- **Uso**: cruce contra planilla de aduana y declaración de embarque para detectar errores y órdenes sin permiso.

@@ -302,3 +302,48 @@ Preguntas que cierran el schema definitivamente. Ver `research.md` sección 7.12
 
 ### D8 — Renombrar `openssl rand -base64 32` → `openssl rand -hex 24` en `.env.local.example` línea 21. ✅
 - **Estado**: **cerrada (29/04)**. Cambio ejecutado por Claude Code. Pendiente commit de Jona: `git add .env.local.example && git commit -m "fix: D8 WEBHOOK_SECRET generation command"`.
+
+---
+
+## Legacy schema — preguntas para Brian / Santiago (29/04)
+
+Derivadas del análisis de repos `importer` + `metric-api`. Ver `docs/legacy-schema-analysis.md`.
+
+### Q40 — [Brian] ¿Qué valores tiene la tabla `statuses` en producción?
+- **Por qué importa**: solo `status_id=1` ('N') está en seeders. Metric usa `9` y `12` sin documentación.
+- **Estado**: abierta.
+
+### Q41 — [Brian] ¿`pivot_entities` está activa o deprecada?
+- **Por qué importa**: Importer usa FKs directas, Metric usa la pivote. El schema nuevo elige uno.
+- **Estado**: abierta.
+
+### Q42 — [Santiago] ¿Metric y el Importer comparten la misma DB MySQL?
+- **Contexto**: Metric apunta a `35.193.12.137:3306`, DB `ssb_internacional`.
+- **Estado**: abierta.
+
+### Q43 — [Santiago] ¿Existen migrations formales para `expo_vessels`, `dow_port`, `carrier_leg`, `report_301`, `report_315`, `simis`, `prefolder_operation_log`?
+- **Por qué importa**: sin schema formal no podemos asumir estructura estable.
+- **Estado**: abierta.
+
+### Q44 — [Santiago] ¿El 301 llega a SAP por HTTP o SAP lo lee por batch desde `report_301`?
+- **Por qué importa**: define el timing del dashboard entre aceptación SSB y visibilidad SAP.
+- **Estado**: abierta.
+
+### Q45 — [Brian / Santiago] ¿Quién popula `simis.nro_despacho` hoy? ¿Manual, n8n, otro?
+- **Por qué importa**: define si el dashboard puede confiar en `simis` o necesita persistir el permiso por cuenta propia.
+- **Estado**: abierta.
+
+### Q46 — [Operativa / Jona] ¿Cómo llega el BL Number al sistema? No está en el 304.
+- **Por qué importa**: el BL es el documento central. Tiene que entrar por otro canal (mail carrier, portal, API Maersk).
+- **Estado**: abierta.
+
+### Q47 — [Santiago] ¿Qué otros `status_id` además de 9 y 12 usa Metric? ¿Hay un enum documentado?
+- **Estado**: abierta. Derivada de Q40.
+
+### Q48 — [Brian] ¿Hay constraint `UNIQUE` en `orders.purchase_order` en producción?
+- **Por qué importa**: el dashboard usa `purchase_order` como join key — necesita garantía de unicidad.
+- **Estado**: abierta.
+
+### Q49 — [Santiago] ¿`/prefolder/send` apunta a Interlog test o producción en el deploy actual?
+- **Por qué importa**: si ya apunta a prod, el dashboard puede coordinar el flujo de instrucción de exportación.
+- **Estado**: abierta.

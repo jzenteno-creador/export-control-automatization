@@ -36,3 +36,6 @@ samples/
 
 # Handoffs de sesión (efímeros, no al repo)
 SESSION_HANDOFF.md
+
+# Explorador local con anon key hardcodeada — NO SUBIR
+explorer-304.html
