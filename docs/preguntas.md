@@ -1,7 +1,7 @@
 # Preguntas abiertas
 
 **Proyecto**: SSB-IT-RESEARCH
-**Última actualización**: 24/04/2026
+**Última actualización**: 29/04/2026
 
 Priorizadas por impacto en diseño. Marcar con ✅ al cerrarse.
 
@@ -180,9 +180,9 @@ Preguntas que cierran el schema definitivamente. Ver `research.md` sección 7.12
 
 ### Q25 — ¿Es viable técnicamente agregar al Importer una llamada HTTP POST saliente al dashboard después de recibir el 304 en `/api/orders/store`?
 - **Quién responde**: Brian.
-- **Contexto**: es el pedido formal enviado por mail el 22/04. Tiene OK de Mariano.
+- **Contexto**: es el pedido formal enviado por mail el 22/04. Tiene OK de Mariano. Brian tenía el viernes 25/04 para pushear a producción — no se ejecutó. Levantado nuevamente el 29/04.
 - **Por qué importa**: si Brian dice que no, hay que volver a evaluar alternativas (SFTP, cola intermedia, modificar SAP). Si dice que sí, se coordina implementación.
-- **Estado**: abierta. **Bloquea siguiente milestone** (conectar el endpoint del Walking Skeleton con datos reales de producción). Sin respuesta al 24/04.
+- **Estado**: abierta. Sin respuesta al 29/04.
 
 ### Q26 — ¿El módulo "Logs de JSON" del Importer guarda el 304 de forma idempotente? Si SAP reenvía el mismo 304, ¿se duplica o se detecta?
 - **Quién responde**: Brian.
@@ -218,7 +218,7 @@ Preguntas que cierran el schema definitivamente. Ver `research.md` sección 7.12
 
 ### Q31 — ¿Log-In, Maersk o Hapag-Lloyd ofrecen alguna API para carga de VGM que no requiera el portal web ni el mail?
 - **Quién responde**: comercial SSB (contacto con cada naviera) o search en docs oficiales.
-- **Contexto confirmado 24/04**: research completo en `research-apis-carriers.md`. Maersk tiene API de VGM en su Developer Portal ([developer.maersk.com/api-catalogue/VGM/Learn-more](https://developer.maersk.com/api-catalogue/VGM/Learn-more)) — consumible una vez que se tenga Customer Code. Hapag-Lloyd y Log-In no publican API para VGM. Para R3 inicial, el canal sigue siendo Excel + mail para los 3.
+- **Contexto confirmado 24/04**: research completo en `research-apis-carriers.md`. Maersk tiene API de VGM en su Developer Portal — consumible una vez que se tenga Customer Code. Hapag-Lloyd y Log-In no publican API para VGM. Para R3 inicial, el canal sigue siendo Excel + mail para los 3.
 - **Por qué importa**: si alguna lo tiene, R3 podría incluir envío automático online para esa naviera. Si ninguna, confirmamos NG12 definitivo.
 - **Estado**: parcialmente resuelta (24/04). Decisión provisional: R3 arranca con Excel + mail para los 3; integración API Maersk VGM se evalúa como mejora si aparece Customer Code antes de R3.
 
@@ -239,38 +239,39 @@ Preguntas que cierran el schema definitivamente. Ver `research.md` sección 7.12
 
 ### Q34 — ¿Log-In ofrece alguna forma de automatización no-UI para submit de SI y descarga de BL draft?
 - **Quién responde**: Log-In (área comercial / IT).
-- **Contexto**: mail enviado por Jona el 24/04 preguntando por API directa, EDI, SFTP, hub alternativo, o cualquier otro canal estructurado. Research externo (`research-apis-carriers.md` §4) confirma que no hay developer portal público, no está en DCSA, no aparece en INTTRA. Log-Aí es solo UI web con login/password.
-- **Por qué importa**: **bloquea la decisión de cómo integrar Log-In en R1**. Log-In es 60-70% del volumen de SSB — si ofrecen cualquier canal automatizado, cambia materialmente la propuesta de R1. Si no ofrecen nada, R1 arranca en modo asistido + evaluación de RPA sobre Log-Aí.
-- **Estado**: abierta. Sin respuesta al 24/04.
+- **Contexto**: mail enviado por Jona el 24/04. Research externo confirma que no hay developer portal público, no está en DCSA, no aparece en INTTRA. Log-Aí es solo UI web con login/password.
+- **Por qué importa**: **bloquea la decisión de cómo integrar Log-In en R1**. Log-In es 60-70% del volumen de SSB.
+- **Estado**: abierta. Sin respuesta al 29/04.
 
 ### Q35 — ¿Maersk tiene algún programa de onboarding API específico para forwarders LATAM o para cuentas Dow?
 - **Quién responde**: Maersk (área técnica).
-- **Contexto**: mail enviado por Jona el 24/04 después de conversación verbal con vendor local. El vendor derivó la consulta al sector técnico por mail. Research en `research-apis-carriers.md` §2 confirma que el Developer Portal es self-service, pero el Customer Code A136 PBB/Dow se gestiona localmente.
-- **Por qué importa**: información — no bloquea nada. Si existe onboarding dedicado con SLA y soporte técnico, reduce el riesgo de R1 Maersk. Si no, seguimos el path self-service.
-- **Estado**: abierta. Sin respuesta al 24/04.
+- **Contexto**: mail enviado por Jona el 24/04. Developer Portal es self-service, pero el Customer Code A136 se gestiona localmente.
+- **Por qué importa**: informativo. Si existe onboarding dedicado reduce el riesgo de R1 Maersk.
+- **Estado**: abierta. Sin respuesta al 29/04.
 
 ### Q36 — Cotización INTTRA / e2open para SSB (plan B).
 - **Quién responde**: área comercial e2open / INTTRA.
-- **Contexto**: research en `research-apis-carriers.md` §2.5, §3.7, §5 decisión 2. INTTRA resolvería Hapag-Lloyd (y daría canal redundante para Maersk) pero **no resuelve Log-In**. Dado el bajo volumen de Hapag en SSB, contratar hoy no se justifica. Queda reservado como plan B.
-- **Por qué importa**: tener la cotización lista permite decidir rápido si Hapag empieza a subir volumen o si aparece un segundo cliente SSB que lo requiera.
-- **Estado**: **no se cotiza hoy**. A reevaluar si alguno de los disparadores ocurre. Diferida.
+- **Estado**: **no se cotiza hoy**. A reevaluar si Hapag sube volumen o aparece segundo cliente SSB que lo requiera. Diferida.
 
 ### Q37 — Obtener Customer Code Maersk vinculado a cuenta A136 PBB/Dow.
-- **Quién responde**: oficina local Maersk Argentina (con apoyo comercial SSB que gestione la relación).
-- **Contexto**: las Customer APIs de Maersk en el Developer Portal requieren que el consumer key esté asociado a al menos 1 Customer Code válido. Para obtener datos reales de órdenes PBB, el código tiene que ser el de la cuenta A136. Self-service en el portal no lo genera — lo asigna la oficina local.
-- **Por qué importa**: **bloqueante de R1 Maersk**. Sin Customer Code, el desarrollo puede avanzar contra mocks DCSA, pero la integración real no.
-- **Estado**: abierta. Jona lo genera la próxima sesión (24/04 cerrado para hoy).
+- **Quién responde**: oficina local Maersk Argentina.
+- **Por qué importa**: **bloqueante de R1 Maersk**. Sin Customer Code, solo se puede desarrollar contra mocks DCSA.
+- **Estado**: abierta. Gestionar con oficina local Maersk AR.
 
 ### Q38 — Confirmación técnica de las 5 decisiones de diseño del research de APIs.
-- **Quién responde**: Jona + Claude en próxima sesión (no requiere tercero).
-- **Contexto**: ver `research-apis-carriers.md` §5. Las 5 decisiones quedan enumeradas, no tomadas:
-  1. Arquitectura de adapters por carrier (interface común, implementación distinta).
-  2. INTTRA plan B (no se contrata hoy).
-  3. Orden de arranque R1: eje técnico Maersk + eje UX Log-In; no los 3 en paralelo.
-  4. DCSA BL 3.0 como contrato interno (canonical model).
-  5. Orden de onboarding Maersk (registro → app → keys → productos → Customer Code → Visibility Studio support mail).
-- **Por qué importa**: estas decisiones ajustan R1 en el plan. Sin tomarlas, el plan.md queda desactualizado.
-- **Estado**: abierta. **Primer punto de la próxima sesión.**
+- **Quién responde**: Jona + Claude.
+- **Contexto**: analizadas en sesión 29/04. Decisión: APIs de carriers dejadas **en plan a definir**. Orden probable R1: Maersk → Log-In. Sin formalizar todavía.
+- **Estado**: **parcialmente resuelta (29/04)**. A formalizar cuando haya más data (respuestas Q34/Q35, tráfico real de Brian).
+
+---
+
+## Dow / SAP — nuevas (29/04)
+
+### Q39 — ¿SSB ya recibió el Tender file de Dow Sourcing con los Lane IDs actualizados (vigentes desde 1° mayo 2026)?
+- **Quién responde**: Leo Mutto + Jorge Rojas (coordinación con Dow Sourcing).
+- **Contexto**: Dow (Travis Spry) solicita que SSB agregue un nuevo campo `LaneID` en el JSON 301 (respuesta de booking que SSB envía a Dow). El dato lo provee Dow Sourcing vía Tender file. Ejemplos del formato: `ARBHI-PRtPR-BRIOA---40C-MRK`, `ARBUE-PRtPR-BRSUA---40C-MRK` (máx 34 caracteres). Dow confirma que para testing puede usarse cualquier texto ≤34 chars. Target go-live: Q2 2026, testing completo antes de mid-junio.
+- **Por qué importa**: impacta el schema del 301 y el flujo de datos de Metric hacia SAP. Si SSB no tiene el Tender file, no puede mapear el campo. Si lo tiene, el desarrollo puede arrancar.
+- **Estado**: abierta. Coordinar con Leo Mutto + Jorge Rojas (SSB) y Maru Barbieri / Travis Spry (Dow).
 
 ---
 
@@ -297,12 +298,7 @@ Preguntas que cierran el schema definitivamente. Ver `research.md` sección 7.12
 - **Estado**: abierta. Decisión a tomar cuando Brian confirme integración y empiece a fluir tráfico real.
 
 ### D7 — Renombrar `SUPABASE_WEBHOOK_SECRET` → `WEBHOOK_SECRET` en `.env.local.example`. ✅
-- **Contexto**: el script de carga del 22/04 tarde descubrió que `.env.local` usa `WEBHOOK_SECRET` (sin prefijo), pero varios prompts antiguos y docs mencionaban `SUPABASE_WEBHOOK_SECRET`. Claude Code usó el correcto por inferencia, pero el `.env.local.example` estaba desalineado.
-- **Estado**: **cerrada (22/04 tarde) por commit `6b05fd1`**. Descubierto en el análisis previo de Claude Code en la sesión del 23/04 (al intentar ejecutar D7, encontró que ya estaba alineado — el handoff del 22/04 la había listado incorrectamente como pendiente). Sin acción adicional necesaria.
+- **Estado**: **cerrada (22/04 tarde) por commit `6b05fd1`**.
 
-### D8 — Renombrar `openssl rand -base64 32` → `openssl rand -hex 24` en `.env.local.example` línea 21.
-- **Contexto**: observación colateral del análisis previo de Claude Code en la sesión del 23/04. El handoff del 22/04 lo había listado como pendiente y no se ejecutó.
-- **Por qué importa**: consistencia con lo que el equipo usa realmente para generar el secret. Trivial.
-- **Estado**: abierta. 2 min en Claude Code en próxima sesión de coding.
-
----
+### D8 — Renombrar `openssl rand -base64 32` → `openssl rand -hex 24` en `.env.local.example` línea 21. ✅
+- **Estado**: **cerrada (29/04)**. Cambio ejecutado por Claude Code. Pendiente commit de Jona: `git add .env.local.example && git commit -m "fix: D8 WEBHOOK_SECRET generation command"`.
