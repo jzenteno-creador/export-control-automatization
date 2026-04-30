@@ -380,6 +380,10 @@ Estado de tareas:
 7. ✅ **Cargar 11 JSONs al endpoint del WS** para tener data real en `inbound_events`. Cerrada 22/04 tarde (11/11 éxito).
 8. ✅ **Goals/Non-goals del MVP (prerequisito metodológico #1)**. Cerrada 23/04 — v5 consolidada en §3.
 9. ✅ **Alinear `.env.local.example`** (D7). Cerrada 22/04 por commit `6b05fd1`.
+9bis. ✅ **Explorer local de análisis** (`explorer-304.html`, gitignoreado, raíz del repo). Herramienta para Jona/Claude. 5 vistas: Lista (filtros PO/Tipo/MOT/País/Sold-to/Ship-to), Por Cliente (agrupado por BT/CN, colapsable), Comparar (full-width, todos los campos en cabecera + items detallados, filtros Destino+MOT en sidebar, banner contextual al venir de Anomalías), Anomalías (3 categorías: IOR activo 🔵, Entidades faltantes 🔴, ISC mixto 🟡), DetailPanel con 6 tabs (Campos clave + Entidades + Items + Instrucciones + JSON crudo + JSON ✦ anotado). Cerrada 29/04.
+9ter. ✅ **`scripts/extract_pos.py`** — descargador puntual de JSONs 304 desde `importer.ssbplatform.com` por lista de PO numbers. Versionado en `scripts/`, credenciales por env vars. Cerrada 29/04.
+9quater. ✅ **MOT con ISC primario** — fix al explorer. `getMotInfo()` ahora usa `IntermodalServiceCode` como L1, `TransportationMethodTypeCode` como L2 fallback. Detalle en `research.md` §9.3. Cerrada 29/04.
+9quinquies. ✅ **Patrón IOR confirmado y documentado** — `getSoldToName()` aplica regla CN > BT. Resultado correcto en 116/116 órdenes. Detalle en `research.md` §9.9 y `business-context.md` §9.4. Cerrada 29/04.
 10. ⏳ **C4 Context L1** (prerequisito metodológico #2). Draft en §5, pendiente de revisión con Jona.
 11. ⏳ **Pre-mortem del MVP** (prerequisito metodológico #3). Sin arrancar.
 12. ⏳ **Respuesta de Brian sobre viabilidad del webhook** (Q25). Bloquea tráfico productivo.
@@ -387,7 +391,7 @@ Estado de tareas:
 14. ⏳ **Mapear flujo as-is completo con documentales** (Q12, Q13, Q14).
 15. ⏳ **Santiago — solicitar endpoints de consulta + push de 301/315** desde Metric al dashboard.
 16. ⏳ **API Interlog — fecha de puesta en producción**. A pedir a Interlog.
-17. ⏳ **Primer draft de schema normalizado** (`orders`, `shipments`, `entities`, `outbox`, `workflow_log`). **Prerequisitos duros**: C4 L1 cerrado, Pre-mortem hecho, primeros 20-30 eventos reales en `inbound_events` (✅ ya hay 11), Brian confirma webhook (⏳).
+17. ⏳ **Primer draft de schema normalizado** (`orders`, `shipments`, `entities`, `outbox`, `workflow_log`). **Prerequisitos duros**: C4 L1 cerrado (⏳), Pre-mortem hecho (⏳), primeros 20-30 eventos reales en `inbound_events` (✅ ya hay 116), Brian confirma webhook (⏳ — opcional, ya hay muestra empírica suficiente). **Próximo paso prioritario** una vez cerrados C4 L1 y Pre-mortem.
 18. ⏳ **Investigar APIs de VGM en navieras** (Log-In, Maersk, Hapag-Lloyd). No existen hoy. Consulta proactiva para evaluar futura automatización online.
 19. ⏳ **Renombrar `openssl rand -base64 32` → `-hex 24`** en `.env.local.example` línea 21 (observación colateral de Claude Code). Trivial, próxima sesión de coding. (D8)
 20. ⏳ **Manual de configuración de VS Code** (no urgente).
@@ -409,14 +413,14 @@ Orden sugerido para la próxima sesión:
 
 ## 11. Estado del Walking Skeleton
 
-**Desplegado y verificado.** Última prueba: 22/04 tarde, 11 JSONs reales cargados con éxito (8 nuevos + 3 idempotencia detectada).
+**Desplegado y verificado.** Última carga: 29/04, 5 JSONs adicionales vía `scripts/extract_pos.py` (POs `116565016`, `118198950`, `118254602`, `118282166`, `118478552`).
 
 - Proyecto Supabase: `ssb-export-dashboard` (ref `cctuowthpnstvdgjuomq`, São Paulo, free).
 - Endpoint: `POST https://cctuowthpnstvdgjuomq.supabase.co/functions/v1/ingest-304`.
 - Auth: shared secret via header `X-Webhook-Secret` (`.env.local` y Project Secrets de Supabase).
 - Idempotencia: SHA-256 del body crudo + UNIQUE constraint en `inbound_events.payload_hash`.
 - Auditoría: cada intento queda en `inbound_log` con IP, user-agent, resultado, status.
-- Total eventos en `inbound_events` al cierre: **11 reales**.
+- Total eventos en `inbound_events` al cierre: **116 reales** (11 manuales 22/04 + 100 con criterios de diversidad 29/04 + 5 puntuales 29/04).
 - Detalles completos: `walking-skeleton.md`.
 - Contrato para Brian: `webhook-contract-304.md`.
 

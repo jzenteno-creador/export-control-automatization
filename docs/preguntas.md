@@ -347,3 +347,20 @@ Derivadas del análisis de repos `importer` + `metric-api`. Ver `docs/legacy-sch
 ### Q49 — [Santiago] ¿`/prefolder/send` apunta a Interlog test o producción en el deploy actual?
 - **Por qué importa**: si ya apunta a prod, el dashboard puede coordinar el flujo de instrucción de exportación.
 - **Estado**: abierta.
+
+---
+
+## SAP / Shipping Type — nuevas (29/04, post 116 JSONs)
+
+### Q50 — [Brian] ¿Bug de configuración SAP o intencional? 26 órdenes con `IntermodalServiceCode=05` (FCL marítimo) pero `TransportationMethodTypeCode=M` (terrestre).
+- **Contexto**: en la muestra de 116 JSONs, **26 STO** tienen ISC=05 (FCL Full Container = marítimo) pero el `RouteInformation[0].TransportationMethodTypeCode` dice `M` (terrestre). El explorer ahora usa ISC como fuente primaria y reclasifica esas 26 a "Marítimo" (eran las afectadas por el bug). Detalle en `research.md` §9.3.
+- **Por qué importa**: si es un bug de configuración SAP (el `TransportationMethodTypeCode` toma el modo del primer leg de la ruta, terrestre desde planta al puerto, en vez del modo principal del shipment), el dashboard puede ignorarlo y confiar en ISC. Si es intencional (algún workflow downstream lo requiere así), no se puede simplemente sobrescribir. ¿Cómo se configura el Shipment Document para que `TransportationMethodTypeCode` refleje el modo principal y no el primer leg?
+- **Estado**: abierta. A consultar a Brian con la próxima reunión técnica.
+
+### Q51 — [Brian / Jona] Confirmar lista completa de `IntermodalServiceCode` que pueden aparecer en órdenes Dow → SSB.
+- **Contexto**: en la muestra de 116 aparecen sólo `01`, `03`, `05`, `06`, `11`. El mapping SAP completo según *Shipment Master* tiene 9 valores: `01, 02, 03, 05, 06, 07, 11, 12, 18` (ver `research.md` §7.10 subsección "Mapeo completo"). ¿Pueden aparecer `02` (LTL Partial), `07` (Air Cargo), `12` (ISO Tank Road), `18` (ISO Tank Sea) u otros del mapping en órdenes Dow → SSB? Esto define si el explorer debe estar preparado para todos los códigos o solo para el subset observado.
+- **Estado**: abierta.
+
+### Q52 — [Santiago] ¿Hay documentación del mapping de los códigos en `RouteDescription`?
+- **Contexto**: el campo `RouteInformation[0].RouteDescription` sigue patrones tipo `LAA-CUST-PCKUP` (customer pickup AR), `TM-ST05-TT37` (ruta marítima con terminal específica), `AR-C106-LAA-BR` (AR→BR vía ruta C106). El explorer expone estos códigos en la solapa "JSON ✦" pero no los traduce. ¿Existe una tabla de routes en Metric/Importer? ¿El campo cambia cuando el carrier real (Maersk, Hapag, Log-In) reemplaza a SSB en el shipment, o queda fijo desde la generación del 304?
+- **Estado**: abierta.

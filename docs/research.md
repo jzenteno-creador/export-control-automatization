@@ -537,10 +537,28 @@ Array de ítems. Cada ítem representa un producto dentro de un contenedor (o gr
 | Campo | Valores vistos | Significado |
 |---|---|---|
 | `NumberOfContainers` | 1, 2, 3, 4 | Cantidad de contenedores asignados al ítem |
-| `IntermodalServiceCode` | `01`, `05` | **01** = terrestre (7 ocurrencias). **05** = marítimo contenedor completo (24 ocurrencias). Input de Jona: codifica tipo de exportación (contenedor completo, presurizado, aéreo, bulk). |
+| `IntermodalServiceCode` | `01`, `03`, `05`, `06`, `11` (en la muestra de 116). En SAP existen 9 valores. | Tipo de servicio intermodal SAP (Shipping Type). **Ver tabla completa abajo.** |
 | `EquipmentType` | `40CZ`, `VAEM` | **40CZ** = contenedor marítimo 40 pies (no es ISO 6346 estricto, es código Dow-specific). **VAEM** = equipo terrestre (camión/van, sin contenedor marítimo). |
 | `EquipmentNumber` | `40CMISSING`, `XNOTFOUNDX` | Placeholder — el número real del contenedor aún no se asignó cuando Dow genera el 304 (se conoce recién en despacho). |
 | `SealNumber` | `NA` | Mismo motivo — precinto se asigna en despacho. |
+
+##### Mapeo completo de `IntermodalServiceCode`
+
+Fuente: SAP Shipment Master, campo *Shipping Type*. Confirmado por Jona el 29/04/2026.
+
+| Código | Descripción SAP | MOT |
+|--------|-----------------|------|
+| 01 | TL Full Truckload | ROAD |
+| 02 | LTL Partial TL | ROAD |
+| 03 | Tank Truck | ROAD |
+| 05 | FCL Full Container | MARITIME |
+| 06 | LCL Part Container | MARITIME |
+| 07 | Air Cargo | AIR |
+| 11 | Deep Sea Vessel | MARITIME |
+| 12 | ISO Tank Road | ROAD |
+| 18 | ISO Tank Sea | MARITIME |
+
+Distribución empírica en la muestra de 116 órdenes (462 items): `05`+MOT=O 327 items, `05`+MOT=M 114 items (ver §9.3 — caso típico de inconsistencia entre `TransportationMethodTypeCode` e `IntermodalServiceCode` en STOs), `01`+MOT=M 18 items, `06`+MOT=O 1 item, `03`+MOT=M 1 item, `11`+MOT vacío 1 item.
 
 #### ReferenceIdentification (nivel ítem)
 
@@ -886,13 +904,15 @@ El `plan.md` **no se actualiza con esto en la sesión de 24/04** — las 5 decis
 
 ---
 
-## 9. Análisis de 111 JSONs — hallazgos clave (29/04)
+## 9. Análisis de 116 JSONs — hallazgos clave (29/04)
 
-**Muestra**: 11 manuales del 22/04 + 100 nuevos del 29/04 vía script contra `importer.ssbplatform.com`. STO=55, Trade=56.
+**Muestra**: 11 manuales del 22/04 + 100 nuevos del 29/04 vía script (extracción con criterios de diversidad) + 5 puntuales del 29/04 vía `scripts/extract_pos.py` (POs `116565016`, `118198950`, `118254602`, `118282166`, `118478552`). STO=55, Trade=61. Total=116.
+
+**Método de extracción documentado** (29/04): el script ad-hoc escrito en `/tmp` para los 100 con criterios de diversidad NO se versionó (se borró al final de su sesión). Tras recuperarlo del session log, se versionó en `scripts/extract_pos.py` una variante adaptada para descarga puntual por lista de PO numbers — login con `_token` CSRF + cookie `XSRF-TOKEN`, POST a `/admin/jsonLogs/listarLogsJson` con `filtro[0][name]=po_number`, filtrado `is_304()`. Reusable para próximas extracciones; las credenciales se pasan por variables de entorno.
 
 ### 9.1 Regla estable: Item = Delivery = Contenedor
 
-Confirmado en 111/111 órdenes: `Items.length` = deliveries únicas = contenedores o camiones.
+Confirmado en 116/116 órdenes: `Items.length` = deliveries únicas = contenedores o camiones.
 
 - `Items[].ContainerDetails[].NumberOfContainers` repite el total del shipment por ítem → **NO usar para contar contenedores**.
 - `Items.length` es el contador correcto.
@@ -903,19 +923,36 @@ Confirmado en 111/111 órdenes: `Items.length` = deliveries únicas = contenedor
 
 | Campo | Path en JSON | Ejemplo |
 |---|---|---|
-| GMID (18 dígitos) | `Items[].DescriptionMarksAndNumbers.CommodityCode` | `000000000000374367` |
-| GMID significativo (6 dígitos) | últimos 6 del CommodityCode | `374367` |
-| Descripción comercial | `Items[].DescriptionMarksAndNumbers.LadingDescription` | `DOWLEX(tm) TG 2085B Polyethylene Resin` |
+| GMID (crudo, 18 dígitos con leading zeros) | `Items[].DescriptionMarksAndNumbers[0].CommodityCode` | `000000000000374367` |
+| GMID display (sin leading zeros) | `parseInt(commodityCode, 10).toString()` | `374367` |
+| Descripción comercial | `Items[].DescriptionMarksAndNumbers[0].LadingDescription` | `DOWLEX(tm) TG 2085B Polyethylene Resin` |
 
-### 9.3 MOT: fallback por RouteDescription
+> Nota: el explorer pasó de truncar a "últimos 6 dígitos" a usar `parseInt` sin leading zeros (30/04). Para los GMIDs Dow vistos en la muestra el resultado es idéntico (todos tienen ≤6 dígitos significativos), pero la nueva regla es robusta a GMIDs más largos.
 
-`RouteInformation[0].TransportationMethodTypeCode` vacío en algunas órdenes STO.
+### 9.3 MOT: jerarquía de 3 niveles (ISC primario)
 
-- `O` → Marítimo
-- `M` → Terrestre
-- vacío → leer `RouteDescription`: `DSV/TT/TM-/SEA` → Marítimo; `FTL/CUST/PCKUP/AR-` → Terrestre
+`RouteInformation[0].TransportationMethodTypeCode` **NO es confiable como fuente primaria**: en STOs SAP popula este campo con el modo del primer leg (típicamente terrestre desde la planta al puerto) aunque el shipment sea FCL marítimo. En la muestra de 116 órdenes, **26 órdenes STO** tienen `TransportationMethodTypeCode=M` pero todos sus items tienen `IntermodalServiceCode=05` (FCL marítimo) — son marítimas reales, no terrestres.
 
-110 explícitos + 1 inferido correctamente en la muestra.
+El `IntermodalServiceCode` viene del *Shipping Type* del SAP Shipment Master y es el dato correcto del modo del shipment. Por eso el explorer aplica esta jerarquía:
+
+1. **`Items[0].ContainerDetails[0].IntermodalServiceCode`** — fuente primaria. Mapping en §7.10 (subsección "Mapeo completo"): `01/02/03/12→ROAD`, `05/06/11/18→MARITIME`, `07→AIR`. Cuando ISC está presente y conocido, gana sobre `TransportationMethodTypeCode`. Si los dos campos discrepan, se loguea (`console.warn`) el PO con ambos valores.
+2. **`RouteInformation[0].TransportationMethodTypeCode`** — solo si ISC vacío o desconocido. `O→Marítimo`, `M→Terrestre`, `A→Aéreo`, `R→Ferroviario`.
+3. **`RouteDescription` keywords** — solo si nivel 2 también está vacío. Heurística legacy: `DSV/TT/TM-/SEA→Marítimo`; `FTL/CUST/PCKUP/AR-→Terrestre`.
+
+Distribución antes vs después del fix (29/04 sobre los 116):
+
+| Lógica | Marítimo | Terrestre | Total |
+|---|---:|---:|---:|
+| Vieja (MOT_code primero) | 79 | 37 | 116 |
+| Nueva (ISC primero) | **105** | **11** | 116 |
+
+26 órdenes STO migraron de "Terrestre" → "Marítimo" — eran las afectadas por el bug SAP del primer leg.
+
+**Detector de anomalías**: con ISC como fuente primaria, la "inconsistencia MOT vs ISC" deja de ser anomalía (el ISC ya gana). El detector actual del explorer reporta solo 3 categorías (29/04):
+
+- 🔵 **IOR activo** (informativa, 16 órdenes en la muestra) — CN existe y CN.Name ≠ BT.Name. Ver §9.9.
+- 🔴 **Entidades críticas faltantes** — BT/ST siempre, N1 sólo si MOT=Marítimo. 0 casos en la muestra.
+- 🟡 **Items con `IntermodalServiceCode` mixto** dentro de la misma orden. 0 casos en la muestra.
 
 ### 9.4 DeliveryLocation — normalización requerida
 
@@ -939,19 +976,40 @@ Confirmado en 111/111 órdenes: `Items.length` = deliveries únicas = contenedor
 |---|---|
 | `EX` | Exporter (PBB Polisur A136) |
 | `ST` | Ship-To (destinatario físico, fuente del país destino) |
-| `N1` | Notify Party |
-| `BT` | Bill-To |
+| `N1` | Notify Party (obligatorio en marítimas; opcional en terrestres) |
+| `BT` | Bill-To / Sold-to comercial. **En STO puede ser depósito fiscal o cliente intermediario** — ver `CN` para el destinatario real (IOR). Detalle en §9.9. |
 | `16` | Plant / Punto de despacho |
 | `NP` | Notify Party secundario |
-| `CN` | Consignee BL |
+| `CN` | Consignee BL / Importer of Record cuando BT es depósito |
 | `DIR` | Distribution Recipient (NO "Director") |
 | `PK` | Doc. Recipient original |
 | `PK2`, `PK3` | Doc. Recipient copia 2/3 |
-| `AO` | Puerto de destino (Account Of) |
+| `AO` | Punto de entrega del Incoterm. En CPT/CFR = puerto de descarga. En FCA = planta o almacén del exportador (ej. PBB Polisur, Abbott). **No siempre es "puerto de destino"**. |
 
 ### 9.8 BusinessInstructionsReferenceNumberNotes (TXT 107)
 
-Presente en 111/111 con 27 variantes únicas. Instrucciones al forwarder: BL, NCM, notify party, distribución de documentos, empaque ISPM 15, collect/prepaid. Campo de mayor valor operativo para R1. Persistir completo crudo + parseado. Nunca sobreescribir el crudo.
+Presente en 116/116 con variantes textuales. Instrucciones al forwarder: BL, NCM, notify party, distribución de documentos, empaque ISPM 15, collect/prepaid. Campo de mayor valor operativo para R1. Persistir completo crudo + parseado. Nunca sobreescribir el crudo.
+
+### 9.9 Importer of Record (IOR) — 29/04 (post 116 JSONs)
+
+**Pregunta original:** algunas órdenes STO de Dow tienen un partner "Importer of Record" (DOW BRASIL, código `0000962326`) que es el cliente real, distinto del `BT` (Bill-To/Sold-to) que en esos casos es un forwarder (ej. `LOG IN LOGISTICA INTERMODAL SA`, código `0002574200`). En el documento comercial impreso, SOLD TO y SHIP TO muestran DOW BRASIL, no LOG IN. **¿El IOR viene en el JSON del 304?**
+
+**Respuesta:** **sí**, viene como `EntityIdentifier="CN"` (Consignee). En la muestra de 116 JSONs:
+
+- **16 órdenes STO** con `BT.Name = "LOG IN LOGISTICA INTERMODAL SA"` → todas tienen `CN.Name = "DOW BRASIL IND E COM"` con `IdentificationCode = 0000962326`. El código del IOR coincide perfectamente.
+- En esas 16, el `ST.Name` también dice "DOW BRASIL IND E COM", pero con `IdentificationCode = 0002574200` (mismo SAP customer ID que BT/LOG IN). El name es Dow pero el ID es del forwarder. Solo `CN` tiene el ID real `962326`.
+- **No existe** `EntityIdentifier` propio del tipo `IR / IO / IOR / SF` — el IOR se encodea como CN.
+
+**Distribución completa sobre 116:**
+
+| Tipo | Total | con CN | CN ≠ BT | CN = BT | BT es forwarder | CN code = 962326 |
+|---|---:|---:|---:|---:|---:|---:|
+| STO | 55 | 41 | **16** | 25 | 16 | 16 |
+| Trade | 61 | 10 | 0 | 10 | 0 | 0 |
+
+**Implicancia para el explorer (29/04):** `getSoldToName()` ahora aplica regla **CN > BT**. En los 116 casos analizados da el sold-to comercial correcto: cuando hay forwarder en BT, devuelve el cliente real desde CN; cuando no, devuelve BT (porque CN o no existe o coincide con BT).
+
+**Riesgo y mitigación:** la regla asume que CN siempre representa al cliente comercial cuando difiere de BT. Si en futuras muestras aparece una orden con CN que no sea ni el sold-to ni el IOR (ej. consignatario logístico distinto al cliente), la regla la mostraría incorrectamente como sold-to. El explorer expone la solapa **Anomalías** con la categoría informativa 🔵 *"IOR activo (BT es depósito/cliente, CN es el destinatario real)"* — todas las órdenes con CN ≠ BT aparecen ahí para inspección manual; al hacer click en "Comparar" se abre la Vista Comparar con un banner que indica qué columnas revisar (Sold-to / Ship-to / Consignee). Fix futuro robusto: tabla maestra `BT_code → IOR_name` en Supabase para casos especiales.
 
 ---
 

@@ -384,14 +384,25 @@ Referencia rápida de números que aparecen en la operativa. Esta sección es el
 |---|---|---|
 | `EX` | Exportador | Siempre PBB Polisur S.R.L. (A136) |
 | `ST` | Ship To (destinatario físico) | Cliente final |
-| `N1` | Notify Party | Despachante o cliente lado importador |
-| `BT` | Bill To (facturar a) | Generalmente = ST |
+| `N1` | Notify Party | Despachante o cliente lado importador. Obligatorio en marítimas; opcional en terrestres. |
+| `BT` | Bill To / Sold-to comercial | Generalmente = ST. **En STO puede ser depósito fiscal o cliente intermediario** — ver patrón IOR abajo. |
 | `NP` | Notify secundario | Banco, agente, partner |
-| `CN` | Consignee del BL | Consignatario formal (solo en algunos JSONs) |
+| `CN` | Consignee del BL / Importer of Record | Consignatario formal. En STOs con BT=depósito, CN trae el cliente Dow real (ej. DOW BRASIL). |
 | `DIR` | Distribution Recipient | Destinatario de distribución posterior |
 | `PK`, `PK2`, `PK3` | Packer (principal y secundarios) | Partner que empaca |
 | `16` | Plant | Punto de despacho físico |
-| `AO` | Account Of | En estos JSONs: puerto de destino |
+| `AO` | Account Of — punto de entrega del Incoterm | En CPT/CFR = puerto de descarga. En FCA = planta o almacén del exportador (ej. PBB Polisur, Abbott). **No siempre es "puerto de destino"**. |
+
+#### Patrón Importer of Record (IOR) en STOs — confirmado 29/04 (sobre 116 JSONs)
+
+En 16 STOs con destino a Itajaí/SC-Brasil, las entidades del JSON 304 tienen este patrón:
+
+- **BT** (Bill-To): `LOG IN LOGISTICA INTERMODAL SA` (código SAP `0002574200`) — depósito fiscal en Itajaí donde Dow almacena antes de la venta final.
+- **CN** (Consignee): `DOW BRASIL IND E COM` (código SAP `0000962326`) — entidad Dow real que figura como Importer of Record en la documentación comercial.
+- **ST** (Ship-To): `DOW BRASIL IND E COM` (nombre), pero con `IdentificationCode=0002574200` — mismo SAP customer ID que BT/LOG IN. El name resuelve a Dow pero el ID es del depósito. **Ambigüedad conocida en el JSON**: solo `CN.IdentificationCode` trae el código real del IOR (`0000962326`).
+- **Regla del dashboard**: `getSoldToName()` devuelve `CN.Name` si existe, fallback `BT.Name`. Esto da el resultado correcto en 116/116 órdenes (en las 100 sin patrón IOR, CN o no existe o coincide con BT, así que la regla devuelve BT).
+- **Detector de anomalías**: la solapa "Anomalías" del explorer expone la categoría informativa 🔵 *"IOR activo (BT es depósito/cliente, CN es el destinatario real)"* — todas las órdenes con CN ≠ BT aparecen ahí para revisión visual.
+- **Detalle técnico completo**: `research.md` §9.9.
 
 ---
 
