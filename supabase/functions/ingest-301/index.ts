@@ -1,11 +1,15 @@
-// supabase/functions/ingest-304/index.ts
+// supabase/functions/ingest-301/index.ts
 //
-// Walking Skeleton — receptor del JSON del 304 de SAP/Dow.
+// Walking Skeleton — receptor del JSON del 301 de Metric.
+//
+// Diseño espejo de ingest-304: source-agnostic, persist first, idempotente
+// vía SHA-256 + UNIQUE (source, payload_hash). Único cambio sustantivo es
+// el SOURCE y el secret consumido.
 //
 // Contrato:
-//   POST /functions/v1/ingest-304
-//   Header: X-Webhook-Secret: <shared secret>
-//   Body:   JSON crudo del 304
+//   POST /functions/v1/ingest-301
+//   Header: X-Webhook-Secret: <shared secret específico de 301>
+//   Body:   JSON crudo del 301
 //
 // Respuestas:
 //   200 { event_id, duplicate: false }  → payload nuevo persistido
@@ -16,20 +20,23 @@
 //   405 { error: "method_not_allowed" } → método distinto a POST
 //   500 { error: "internal" }           → error inesperado (DB, etc.)
 //
-// Principios:
-//   - Persist first, process after: el payload se guarda crudo en JSONB.
-//   - Idempotencia vía SHA-256 del body crudo + UNIQUE constraint en payload_hash.
-//   - Sin acoplamiento al schema del 304 — cualquier JSON válido entra.
+// Principios (idénticos a ingest-304):
+//   - Persist first, process after: payload guardado crudo en JSONB.
+//   - Idempotencia POR FUENTE vía SHA-256 + UNIQUE (source, payload_hash).
+//   - Sin acoplamiento al schema del 301 — cualquier JSON válido entra.
 //   - Cada intento (exitoso o fallido) se bitacorea en inbound_log.
+//
+// Naming asimétrico aceptado: 304 usa WEBHOOK_SECRET, 301 usa WEBHOOK_SECRET_301.
+// Ver docs/webhook-contract-301.md.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const WEBHOOK_SECRET = Deno.env.get("WEBHOOK_SECRET")!;
+const WEBHOOK_SECRET_301 = Deno.env.get("WEBHOOK_SECRET_301")!;
 
-const SOURCE = "sap-304-webhook";
+const SOURCE = "metric-301-webhook";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
@@ -95,7 +102,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const presented = req.headers.get("x-webhook-secret");
-  if (!presented || presented !== WEBHOOK_SECRET) {
+  if (!presented || presented !== WEBHOOK_SECRET_301) {
     await logAttempt({
       sourceIp,
       userAgent,
@@ -161,9 +168,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       .single();
 
     if (insertError) {
-      // 23505 = unique_violation en Postgres: (source, payload_hash) ya existe.
-      // Filtrar por source además del hash es necesario bajo el composite UNIQUE
-      // de sql/002: dos fuentes distintas pueden, en teoría, compartir hash.
+      // 23505 = unique_violation: (source, payload_hash) ya existe.
       if (insertError.code === "23505") {
         const { data: existing, error: selectError } = await supabase
           .from("inbound_events")
@@ -208,7 +213,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     );
   } catch (err) {
     const message = (err as Error).message ?? String(err);
-    console.error("ingest-304 error:", message);
+    console.error("ingest-301 error:", message);
     await logAttempt({
       sourceIp,
       userAgent,

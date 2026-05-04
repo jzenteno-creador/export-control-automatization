@@ -1,8 +1,8 @@
 # Plan de acción — SSB Export Dashboard
 
 **Proyecto**: SSB-IT-RESEARCH
-**Última actualización**: 23/04/2026
-**Fase actual**: Alcance del MVP cerrado. Goals/Non-goals (v5) + Plan de Releases (R1-R4) listos como base estable. C4 Context L1 en primer draft. Pendientes: validación del C4 L1 con Jona, Pre-mortem del MVP, respuesta de Brian para siguiente milestone de integración.
+**Última actualización**: 04/05/2026
+**Fase actual**: Alcance del MVP cerrado. Goals/Non-goals (v5) + Plan de Releases (R1-R4) listos como base estable. C4 Context L1 en primer draft (postergado). Pre-mortem descartado como prerequisito (ADR de excepción §8 04/05). Walking Skeleton ahora con dos endpoints simétricos: `ingest-304` (SAP) e `ingest-301` (Metric). Pendientes: respuesta de Brian (Q25), tráfico real del 301, validación del C4 L1 cuando se retome.
 
 ---
 
@@ -324,6 +324,7 @@ graph TB
 | `walking-skeleton.md` | Runbook interno del Walking Skeleton del endpoint receptor del 304 | Proyecto Claude.ai + `docs/` local |
 | `sesion-actual.md` | Handoff efímero del cierre de sesión. Se regenera cada cierre. | Proyecto Claude.ai únicamente |
 | `webhook-contract-304.md` | Contrato técnico para consumidores externos (Brian/SAP) | `docs/` local únicamente |
+| `webhook-contract-301.md` | Contrato técnico para consumidores externos (Santiago/Metric) | `docs/` local únicamente |
 
 ---
 
@@ -364,6 +365,12 @@ graph TB
 | 23/04 | **IA entra al MVP en 3 lugares**: parseo del TXT 107 (G6), control del BL en campos de texto libre (G7), template del mail al cliente (G8). | Valor alto y contexto acotado; no requiere ML custom. |
 | 23/04 | **Mailing deja de ser un único checkpoint.** Es un log de envíos por documento: cada doc se puede enviar apenas esté listo. | Operativo: el equipo adelanta docs al cliente a medida que están disponibles. |
 | 23/04 | **D7 resuelta** por commit `6b05fd1` (22/04 tarde, antes del handoff). `.env.local.example` ya usa `WEBHOOK_SECRET`. | Descubierto en análisis previo de Claude Code esta sesión. |
+| 04/05 | **Endpoint receptor del 301 (`ingest-301`) desplegado y verificado.** Source = `'metric-301-webhook'`. Function ID `f51c9844-74ca-4e88-b5c9-341825847f9c`. URL: `https://cctuowthpnstvdgjuomq.supabase.co/functions/v1/ingest-301`. 4 curls de smoke test pasaron (auth fail / bad JSON / inserted / duplicate). | Habilita ingesta de la aceptación de orden simétrica al 304. |
+| 04/05 | **Migration `002_multi_source_support` aplicada al remoto.** UNIQUE simple sobre `payload_hash` → composite `(source, payload_hash)` en `inbound_events`. `inbound_log` no se modificó en esta migration; la trazabilidad de fuente para eventos persistidos queda en `inbound_events.source` vinculada por `event_id`. | Idempotencia correcta por fuente bajo schema source-agnostic con dos endpoints activos. |
+| 04/05 | **`ingest-304` actualizado a v5.** El SELECT del path `duplicate` ahora filtra por `source` además de `payload_hash`. Consistente con la composite UNIQUE de la migration 002. Verificado con regresión: `event_id` `6368d0cf...` del 22/04 preservado. | Bug latente bajo composite UNIQUE — corregido antes de cualquier collision real. |
+| 04/05 | **Pre-mortem del MVP descartado como prerequisito (ADR de excepción).** Decisión Jona sin argumento técnico nuevo. Aceptamos riesgo de migration potencial post-MVP por causas que el pre-mortem podría haber atrapado. **Alcance**: solo este pre-mortem; no es licencia general para saltearse prerequisitos metodológicos. | Desbloquea avance hacia C4 L1 + schema normalizado sin esperar pre-mortem. |
+| 04/05 | **C4 Context L1 postergado.** Sigue como prerequisito del schema normalizado. No se aprueba en esta sesión. | Foco de la sesión fue infraestructura de ingesta (ingest-301 + 002 + fix 304). C4 L1 retoma en próxima sesión de research. |
+| 04/05 | **Mail técnico a Santiago enviado.** Detalle de los dos endpoints: push del 301 hacia el dashboard + endpoint `orders/<po>` en Metric. Santiago confirmó implementación del push del 301 para hoy. Bearer token del endpoint `orders/<po>` pendiente de generación de su lado. | Q33 parcialmente cerrada — push 301 destrabado, push 315 + bearer pendientes. |
 
 ---
 
@@ -384,17 +391,20 @@ Estado de tareas:
 9ter. ✅ **`scripts/extract_pos.py`** — descargador puntual de JSONs 304 desde `importer.ssbplatform.com` por lista de PO numbers. Versionado en `scripts/`, credenciales por env vars. Cerrada 29/04.
 9quater. ✅ **MOT con ISC primario** — fix al explorer. `getMotInfo()` ahora usa `IntermodalServiceCode` como L1, `TransportationMethodTypeCode` como L2 fallback. Detalle en `research.md` §9.3. Cerrada 29/04.
 9quinquies. ✅ **Patrón IOR confirmado y documentado** — `getSoldToName()` aplica regla CN > BT. Resultado correcto en 116/116 órdenes. Detalle en `research.md` §9.9 y `business-context.md` §9.4. Cerrada 29/04.
-10. ⏳ **C4 Context L1** (prerequisito metodológico #2). Draft en §5, pendiente de revisión con Jona.
-11. ⏳ **Pre-mortem del MVP** (prerequisito metodológico #3). Sin arrancar.
+10. ⏳ **C4 Context L1** (prerequisito metodológico #2). Draft en §5, postergado el 04/05. Retoma en próxima sesión de research.
+11. ❌ **Pre-mortem del MVP** (prerequisito metodológico #3). **Descartado** como prerequisito el 04/05 — ADR de excepción registrado en §8. Riesgo aceptado: migration potencial post-MVP por causas que el pre-mortem podría haber atrapado.
 12. ⏳ **Respuesta de Brian sobre viabilidad del webhook** (Q25). Bloquea tráfico productivo.
 13. ⏳ **Resolver Q16-Q24** con Brian cuando haya reunión técnica.
 14. ⏳ **Mapear flujo as-is completo con documentales** (Q12, Q13, Q14).
 15. ⏳ **Santiago — solicitar endpoints de consulta + push de 301/315** desde Metric al dashboard.
 16. ⏳ **API Interlog — fecha de puesta en producción**. A pedir a Interlog.
-17. ⏳ **Primer draft de schema normalizado** (`orders`, `shipments`, `entities`, `outbox`, `workflow_log`). **Prerequisitos duros**: C4 L1 cerrado (⏳), Pre-mortem hecho (⏳), primeros 20-30 eventos reales en `inbound_events` (✅ ya hay 116), Brian confirma webhook (⏳ — opcional, ya hay muestra empírica suficiente). **Próximo paso prioritario** una vez cerrados C4 L1 y Pre-mortem.
+17. ⏳ **Primer draft de schema normalizado** (`orders`, `shipments`, `entities`, `outbox`, `workflow_log`). **Prerequisitos duros**: C4 L1 cerrado (⏳), Pre-mortem descartado como prerequisito (✅ ADR §8 04/05), primeros 20-30 eventos reales en `inbound_events` (✅ ya hay 117 sap-304 + 1 metric-301), Brian confirma webhook (⏳ — opcional, ya hay muestra empírica suficiente). **Próximo paso prioritario** una vez cerrado el C4 L1.
 18. ⏳ **Investigar APIs de VGM en navieras** (Log-In, Maersk, Hapag-Lloyd). No existen hoy. Consulta proactiva para evaluar futura automatización online.
-19. ⏳ **Renombrar `openssl rand -base64 32` → `-hex 24`** en `.env.local.example` línea 21 (observación colateral de Claude Code). Trivial, próxima sesión de coding. (D8)
+19. ✅ **Renombrar `openssl rand -base64 32` → `-hex 24`** en `.env.local.example` línea 21. Cerrada 29/04 por commit `c54aba9`. (D8)
 20. ⏳ **Manual de configuración de VS Code** (no urgente).
+21. ⏳ **Gap en `supabase_migrations.schema_migrations`**: la migration 001 no quedó registrada en el tracker (fue aplicada vía Dashboard SQL editor sin `supabase link`). La migration 002 sí quedó registrada. Si más adelante se quiere usar `supabase db pull`, hay que registrar 001 manualmente con un INSERT en el tracker. No urgente.
+22. ⏳ **Naming asimétrico de secrets aceptado**: `WEBHOOK_SECRET` (sin sufijo) para 304, `WEBHOOK_SECRET_301` para 301. Razón: evitar coordinación de rotación con Brian al cambiar el nombre. Normalizar cuando haya oportunidad (idealmente, próxima rotación coordinada del 304).
+23. ⏳ **Migration 003 propuesta**: agregar columna `source NOT NULL` a `inbound_log` con backfill `'sap-304-webhook'` + índice `inbound_log_source_idx`. Beneficio: filtrar `auth_failed`/`bad_json` por endpoint directamente desde DB sin depender de logs de Edge Functions. No urgente — los Edge Function logs cubren el caso hoy.
 
 ---
 
@@ -402,27 +412,26 @@ Estado de tareas:
 
 Orden sugerido para la próxima sesión:
 
-1. Revisar el draft del C4 Context L1 (§5). Iterar hasta cerrarlo.
-2. Arrancar Pre-mortem del MVP (prerequisito metodológico #3).
-3. Chequear respuesta de Brian (Q25) si ya llegó.
-4. Solicitar a Santiago los endpoints de consulta + push de 301/315 desde Metric.
-5. D8 (rename de `openssl rand` en `.env.local.example`). 2 minutos en Claude Code.
-6. Cuando C4 L1 y Pre-mortem estén cerrados + Brian confirme webhook: arrancar primer draft del schema normalizado.
+1. **Esperar tráfico real del endpoint `ingest-301`**. Santiago confirmó implementación del push del 301 hacia el dashboard para hoy 04/05. Bloqueante operativo: monitorear `inbound_events` con `source='metric-301-webhook'` y `inbound_log` por intentos de Metric (auth fail / bad JSON / inserted).
+2. **Cuando llegue el primer 301 real**: validar shape del payload contra hipótesis del schema, comprobar idempotencia con tráfico no sintético, correlacionar con 304 existentes (cruzar por `purchase_order` o equivalente que aparezca en el body real).
+3. **C4 Context L1 + schema normalizado**: pendientes de la sesión de research que retome. C4 L1 sigue como prerequisito del schema normalizado.
+4. **Q25–Q27 Brian**: sigue bloqueando R1 productivo del 304 (no bloquea schema, hay 117 eventos empíricos). Reactivar contacto cuando Brian responda.
 
 ---
 
 ## 11. Estado del Walking Skeleton
 
-**Desplegado y verificado.** Última carga: 29/04, 5 JSONs adicionales vía `scripts/extract_pos.py` (POs `116565016`, `118198950`, `118254602`, `118282166`, `118478552`).
+**Desplegado y verificado.** Dos endpoints simétricos productivos al 04/05.
 
 - Proyecto Supabase: `ssb-export-dashboard` (ref `cctuowthpnstvdgjuomq`, São Paulo, free).
-- Endpoint: `POST https://cctuowthpnstvdgjuomq.supabase.co/functions/v1/ingest-304`.
-- Auth: shared secret via header `X-Webhook-Secret` (`.env.local` y Project Secrets de Supabase).
-- Idempotencia: SHA-256 del body crudo + UNIQUE constraint en `inbound_events.payload_hash`.
+- **Endpoint 304**: `POST https://cctuowthpnstvdgjuomq.supabase.co/functions/v1/ingest-304` (v5, ACTIVE). Source = `'sap-304-webhook'`. Secret `WEBHOOK_SECRET`.
+- **Endpoint 301**: `POST https://cctuowthpnstvdgjuomq.supabase.co/functions/v1/ingest-301` (v1, ACTIVE). Source = `'metric-301-webhook'`. Secret `WEBHOOK_SECRET_301`. Naming asimétrico aceptado (ver §9 item 22).
+- Auth: shared secret via header `X-Webhook-Secret` por endpoint (`.env.local` y Project Secrets de Supabase).
+- Idempotencia: SHA-256 del body crudo + UNIQUE composite `(source, payload_hash)` en `inbound_events` (migration 002).
 - Auditoría: cada intento queda en `inbound_log` con IP, user-agent, resultado, status.
-- Total eventos en `inbound_events` al cierre: **116 reales** (11 manuales 22/04 + 100 con criterios de diversidad 29/04 + 5 puntuales 29/04).
+- **Distribución de `inbound_events` al cierre del 04/05**: `sap-304-webhook` 117 (116 cargados al 29/04 + 1 del test de regresión del fix v5 hoy) + `metric-301-webhook` 1 (test de smoke 04/05). Total 118 filas.
 - Detalles completos: `walking-skeleton.md`.
-- Contrato para Brian: `webhook-contract-304.md`.
+- Contratos para consumidores externos: `webhook-contract-304.md` (Brian/SAP) y `webhook-contract-301.md` (Santiago/Metric).
 
 ---
 

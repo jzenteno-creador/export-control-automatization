@@ -37,5 +37,9 @@ samples/
 # Handoffs de sesión (efímeros, no al repo)
 SESSION_HANDOFF.md
 
+# Handoff efímero del cierre de sesión.
+# Vive solo en el proyecto Claude.ai. Disciplina §5.5 regla 4.
+docs/sesion-actual.md
+
 # Explorador local con anon key hardcodeada — NO SUBIR
 explorer-304.html

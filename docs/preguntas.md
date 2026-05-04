@@ -1,7 +1,7 @@
 # Preguntas abiertas
 
 **Proyecto**: SSB-IT-RESEARCH
-**Última actualización**: 29/04/2026
+**Última actualización**: 04/05/2026
 
 Priorizadas por impacto en diseño. Marcar con ✅ al cerrarse.
 
@@ -231,7 +231,7 @@ Preguntas que cierran el schema definitivamente. Ver `research.md` sección 7.12
 ### Q33 — Santiago: implementar endpoint de consulta + push 301/315 simétrico al Importer.
 - **Quién responde**: Santiago.
 - **Por qué importa**: **bloquea R4** (tracking).
-- **Estado**: abierta. A coordinar una vez que Brian confirme (Q25).
+- **Estado**: **parcialmente respondida (04/05)**. Mail técnico a Santiago enviado con detalle de los dos endpoints. Santiago acepta implementar el push del 301 hacia el dashboard, lo hace hoy. Push del 315 sin confirmar todavía. Endpoint `orders/<po>` en Metric: aceptado, a construir. Bearer token pendiente de generación de su lado.
 
 ---
 
@@ -327,7 +327,7 @@ Derivadas del análisis de repos `importer` + `metric-api`. Ver `docs/legacy-sch
 
 ### Q44 — [Santiago] ¿El 301 llega a SAP por HTTP o SAP lo lee por batch desde `report_301`?
 - **Por qué importa**: define el timing del dashboard entre aceptación SSB y visibilidad SAP.
-- **Estado**: abierta.
+- **Estado**: abierta. Incluida en el mail enviado a Santiago el 04/05 (junto con la solicitud de push del 301 al dashboard, Q33). Pendiente respuesta.
 
 ### Q45 — [Brian / Santiago] ¿Quién popula `simis.nro_despacho` hoy? ¿Manual, n8n, otro?
 - **Por qué importa**: define si el dashboard puede confiar en `simis` o necesita persistir el permiso por cuenta propia.
@@ -364,3 +364,13 @@ Derivadas del análisis de repos `importer` + `metric-api`. Ver `docs/legacy-sch
 ### Q52 — [Santiago] ¿Hay documentación del mapping de los códigos en `RouteDescription`?
 - **Contexto**: el campo `RouteInformation[0].RouteDescription` sigue patrones tipo `LAA-CUST-PCKUP` (customer pickup AR), `TM-ST05-TT37` (ruta marítima con terminal específica), `AR-C106-LAA-BR` (AR→BR vía ruta C106). El explorer expone estos códigos en la solapa "JSON ✦" pero no los traduce. ¿Existe una tabla de routes en Metric/Importer? ¿El campo cambia cuando el carrier real (Maersk, Hapag, Log-In) reemplaza a SSB en el shipment, o queda fijo desde la generación del 304?
 - **Estado**: abierta.
+
+---
+
+## Infraestructura — backlog interno (04/05)
+
+### Q53 — [Backlog] Migration 001 no registrada en `supabase_migrations.schema_migrations`.
+- **Quién responde**: tarea propia de Claude Code / Jona.
+- **Contexto**: la migration `001_inbound_schema.sql` se aplicó vía Dashboard SQL editor (sin `supabase link`), por eso no quedó registrada en el tracker `supabase_migrations.schema_migrations`. La migration `002_multi_source_support` sí quedó registrada porque se aplicó vía `apply_migration` MCP el 04/05. Resultado: el tracker tiene 002 pero le falta 001.
+- **Por qué importa**: si se quiere usar `supabase db pull` en el futuro para reconstruir migrations a partir del estado remoto, va a aparecer un gap. Hay que registrar 001 manualmente con un INSERT directo en el tracker.
+- **Estado**: backlog. No urgente — el schema está documentado en `sql/001_inbound_schema.sql` que es la fuente de verdad versionable.

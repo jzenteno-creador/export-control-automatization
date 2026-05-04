@@ -1,33 +1,43 @@
-# Walking Skeleton — Ingesta del 304
+# Walking Skeleton — Ingesta del 304 + 301
 
-**Estado**: ✅ deployado y verificado.
-**Versión**: 1 — 2026-04-22.
+**Estado**: ✅ deployado y verificado (dos endpoints simétricos).
+**Versión**: 2 — 2026-05-04.
 
-Primera versión end-to-end del dashboard. Recibe JSON crudo del 304 vía HTTP, lo persiste en Supabase con idempotencia, y loguea cada intento. Es un esqueleto que camina: sin parseo de campos, sin notificaciones, sin UI. La primera slice vertical que toca todos los componentes del stack.
+Primera versión end-to-end del dashboard. Recibe JSON crudo del 304 (SAP) y del 301 (Metric) vía HTTP, lo persiste en Supabase con idempotencia por fuente, y loguea cada intento. Es un esqueleto que camina: sin parseo de campos, sin notificaciones, sin UI. La primera slice vertical que toca todos los componentes del stack.
 
 ---
 
 ## 1. Qué entra y qué sale
 
+Dos endpoints simétricos. Mismo contrato técnico, mismo schema, mismo flujo de validación. Cambian SOURCE y secret consumido.
+
 ```
-cliente HTTP (SAP / Brian / curl)
-        │
-        │ POST JSON + X-Webhook-Secret
-        ▼
-┌──────────────────────────────────┐
-│ Supabase Edge Function ingest-304│
-│   1. valida X-Webhook-Secret     │
-│   2. lee body crudo              │
-│   3. SHA-256 del body            │
-│   4. parsea JSON                 │
-│   5. INSERT idempotente          │
-│   6. log del intento             │
-└──────────────┬───────────────────┘
-               ▼
-         Postgres (Supabase)
-         ├── inbound_events (payload crudo)
-         └── inbound_log    (auditoría)
+SAP / Brian / curl                       Metric / Santiago / curl
+        │                                          │
+        │ POST JSON                                │ POST JSON
+        │ X-Webhook-Secret: $WEBHOOK_SECRET        │ X-Webhook-Secret: $WEBHOOK_SECRET_301
+        ▼                                          ▼
+┌──────────────────────────────────┐    ┌──────────────────────────────────┐
+│ Edge Function ingest-304         │    │ Edge Function ingest-301         │
+│   SOURCE = 'sap-304-webhook'     │    │   SOURCE = 'metric-301-webhook'  │
+│                                  │    │                                  │
+│   1. valida X-Webhook-Secret     │    │   1. valida X-Webhook-Secret     │
+│   2. lee body crudo              │    │   2. lee body crudo              │
+│   3. SHA-256 del body            │    │   3. SHA-256 del body            │
+│   4. parsea JSON                 │    │   4. parsea JSON                 │
+│   5. INSERT idempotente          │    │   5. INSERT idempotente          │
+│      por (source, payload_hash)  │    │      por (source, payload_hash)  │
+│   6. log del intento             │    │   6. log del intento             │
+└──────────────┬───────────────────┘    └──────────────┬───────────────────┘
+               │                                       │
+               └───────────────┬───────────────────────┘
+                               ▼
+                         Postgres (Supabase)
+                         ├── inbound_events (payload crudo, source-tagged)
+                         └── inbound_log    (auditoría source-agnostic)
 ```
+
+Idempotencia bajo composite UNIQUE `(source, payload_hash)`: un mismo body crudo recibido por ambos endpoints persiste como dos filas distintas en `inbound_events` (una por fuente).
 
 ---
 
@@ -36,12 +46,16 @@ cliente HTTP (SAP / Brian / curl)
 | Recurso | Ubicación |
 |---|---|
 | Proyecto Supabase | `ssb-export-dashboard` — ref `cctuowthpnstvdgjuomq` — región `sa-east-1` (São Paulo) — plan free |
-| Endpoint público | `https://cctuowthpnstvdgjuomq.supabase.co/functions/v1/ingest-304` |
-| Schema SQL | `sql/001_inbound_schema.sql` (fuente de verdad versionable) |
-| Edge Function | `supabase/functions/ingest-304/index.ts` |
+| Endpoint 304 | `https://cctuowthpnstvdgjuomq.supabase.co/functions/v1/ingest-304` |
+| Endpoint 301 | `https://cctuowthpnstvdgjuomq.supabase.co/functions/v1/ingest-301` |
+| Schema SQL — base | `sql/001_inbound_schema.sql` (fuente de verdad versionable) |
+| Schema SQL — multi-source | `sql/002_multi_source_support.sql` (composite UNIQUE, aplicado 04/05) |
+| Edge Function 304 | `supabase/functions/ingest-304/index.ts` |
+| Edge Function 301 | `supabase/functions/ingest-301/index.ts` |
 | Env locales | `.env.local` (gitignoreado) + `.env.local.example` (commiteable) |
-| Secret en runtime | Project Secret `WEBHOOK_SECRET` seteado en el Dashboard → Settings → Edge Functions |
-| JSONs de prueba | `samples/304/` (11 JSONs reales, gitignoreado) |
+| Secret 304 en runtime | Project Secret `WEBHOOK_SECRET` (Dashboard → Settings → Edge Functions → Secrets) |
+| Secret 301 en runtime | Project Secret `WEBHOOK_SECRET_301` (Dashboard → Settings → Edge Functions → Secrets) |
+| JSONs de prueba 304 | `samples/304/` (gitignoreado, 116 reales descargados al 29/04) |
 
 ---
 
@@ -49,18 +63,20 @@ cliente HTTP (SAP / Brian / curl)
 
 ### `public.inbound_events`
 
-Eventos entrantes crudos. Inmutable. Idempotencia vía `payload_hash` unique.
+Eventos entrantes crudos. Inmutable. Idempotencia **por fuente** vía composite UNIQUE `(source, payload_hash)` (migration 002, 04/05).
 
 | Columna | Tipo | Notas |
 |---|---|---|
 | `id` | `uuid` PK | `gen_random_uuid()` |
-| `source` | `text` NOT NULL | `'sap-304-webhook'` por ahora |
-| `payload_hash` | `text` NOT NULL **UNIQUE** | SHA-256 hex del body crudo |
+| `source` | `text` NOT NULL | `'sap-304-webhook'` o `'metric-301-webhook'`. Otras fuentes futuras (315, etc.) usan etiqueta propia. |
+| `payload_hash` | `text` NOT NULL | SHA-256 hex del body crudo. Parte de UNIQUE composite `(source, payload_hash)` vía migration 002. |
 | `payload` | `jsonb` NOT NULL | JSON crudo parseado, sin normalizar |
 | `payload_size_bytes` | `integer` NOT NULL | |
 | `received_at` | `timestamptz` | `now()` |
 
 RLS habilitado, **sin policies**. Solo `service_role` lee/escribe.
+
+Cambio respecto a la versión 1 del schema (sql/001): el UNIQUE simple sobre `payload_hash` fue reemplazado por composite `(source, payload_hash)` para permitir que dos fuentes distintas ingresen el mismo hash sin colisionar. Los 116 eventos pre-existentes (todos `sap-304-webhook`) satisfacen la nueva constraint.
 
 ### `public.inbound_log`
 
@@ -85,14 +101,14 @@ RLS habilitado, sin policies. Índices: `received_at DESC`, `result` parcial sob
 
 ## 4. Contrato del endpoint
 
-Resumen. Para la versión formal que se entrega a un consumidor externo, ver `docs/webhook-contract-304.md`.
+Resumen. Para las versiones formales que se entregan a consumidores externos, ver `docs/webhook-contract-304.md` (304) y `docs/webhook-contract-301.md` (301).
 
-**Request**
+**Request** (mismo formato para ambos endpoints, cambia path y secret)
 ```
-POST /functions/v1/ingest-304
+POST /functions/v1/ingest-304   # o /ingest-301
 Host: cctuowthpnstvdgjuomq.supabase.co
 Content-Type: application/json
-X-Webhook-Secret: <shared secret>
+X-Webhook-Secret: <shared secret específico del endpoint>
 
 <JSON body>
 ```
@@ -162,16 +178,23 @@ limit 1;
 
 ---
 
-## 6. Gestión del `WEBHOOK_SECRET`
+## 6. Gestión de secrets por endpoint
 
-### Rotación
+Naming asimétrico aceptado: el secret del 304 quedó sin sufijo por motivos históricos (era el único endpoint cuando se desplegó). El secret del 301 sigue la convención sufijada. Normalizar ambos a la misma convención requeriría coordinar rotación con Brian — no se hace por ahora.
+
+| Endpoint | Variable de entorno | Consumidor externo |
+|---|---|---|
+| `ingest-304` | `WEBHOOK_SECRET` | Brian (Importer Codego) |
+| `ingest-301` | `WEBHOOK_SECRET_301` | Santiago (Metric) |
+
+### Rotación (procedimiento idéntico para ambos)
 1. Generar nuevo valor: `openssl rand -hex 24` (hex puro, sin `=/+/`).
-2. Dashboard → Project Settings → Edge Functions → Secrets → editar `WEBHOOK_SECRET`.
+2. Dashboard → Project Settings → Edge Functions → Secrets → editar la variable correspondiente.
 3. Actualizar `.env.local` localmente.
-4. Avisar a los consumidores por canal privado (no commit, no chat).
+4. Avisar al consumidor del endpoint afectado por canal privado (no commit, no chat). Solo afecta al endpoint cuyo secret se rotó.
 
-### Si el secret se filtra
-Rotar inmediatamente siguiendo los pasos de arriba y auditar `inbound_log` por `source_ip` anómalas.
+### Si un secret se filtra
+Rotar inmediatamente el secret del endpoint afectado siguiendo los pasos de arriba. Auditar `inbound_log` por `source_ip` anómalas en la ventana de exposición.
 
 ---
 
@@ -209,7 +232,9 @@ Orden propuesto:
 
 ---
 
-## 10. Verificación al 2026-04-22
+## 10. Verificación
+
+### 10.1 Inicial — 2026-04-22 (ingest-304 v1)
 
 5 tests corridos contra el endpoint desplegado con 3 JSONs distintos de `samples/304/` (2 Trade + 1 STO) + 1 test de idempotencia + 1 test sin auth. Resultado:
 
@@ -224,3 +249,30 @@ Orden propuesto:
 Estado final:
 - `inbound_events`: 3 filas (count distinct `payload_hash` = 3, sin duplicados).
 - `inbound_log`: 10 filas — `inserted: 3`, `duplicate: 1`, `auth_failed: 6` (incluye 5 tests previos con secret rotado).
+
+### 10.2 Multi-source + fix duplicate path — 2026-05-04
+
+Despliegue de `ingest-301 v1` y redeploy de `ingest-304 v5` post migration 002. Ambos verificados por smoke + regresión.
+
+#### Smoke `ingest-301` (4 curls)
+
+| Test | Input | Esperado | Obtenido | ✓ |
+|---|---|---|---|---|
+| A | POST sin `X-Webhook-Secret` | 401 unauthorized | 401 `{"error":"unauthorized"}` | ✓ |
+| B | POST con secret + body `not-json{` | 400 invalid_json | 400 `{"error":"invalid_json"}` | ✓ |
+| C | POST con secret + JSON nuevo | 200 inserted, event_id | 200 inserted, event_id `76ee17fc-ddcb-44c8-b27c-dd9f6cb8fc91` | ✓ |
+| D | POST repitiendo body de C | 200 duplicate, mismo event_id | 200 duplicate, `76ee17fc...` | ✓ |
+
+#### Regresión `ingest-304` v5 (post-fix duplicate path) — 2 curls
+
+Fix: el SELECT del path de duplicate ahora filtra por `source` además de `payload_hash`, consistente con la composite UNIQUE de la migration 002.
+
+| Test | Input | Esperado | Obtenido | ✓ |
+|---|---|---|---|---|
+| R1 | `samples/304/0118705352.json` (existe en DB desde 22/04) | 200 duplicate + `6368d0cf...` | 200 duplicate + `6368d0cf-5a11-43b9-9d4b-1c5880e29e72` | ✓ |
+| R2 | JSON sintético nuevo | 200 inserted, event_id nuevo | 200 inserted, event_id `58c65cfb-5e7e-484d-88a4-63573d3fdd3e` | ✓ |
+
+Estado final al cierre del 04/05:
+- `inbound_events`: 118 filas — `sap-304-webhook` 117 (116 al 29/04 + 1 del test R2) + `metric-301-webhook` 1 (test C/D del smoke).
+- Constraint activa: `inbound_events_source_payload_hash_key UNIQUE (source, payload_hash)`. UNIQUE simple sobre `payload_hash` ya no existe.
+- `inbound_log` últimos 5 min del cierre: 4 entries del smoke 301 (`auth_failed`, `bad_json`, `inserted`, `duplicate`) + 2 entries de la regresión 304 (`duplicate`, `inserted`). Bitácora limpia y categorizada.
